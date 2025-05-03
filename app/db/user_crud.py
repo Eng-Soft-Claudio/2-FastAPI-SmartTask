@@ -1,0 +1,111 @@
+# app/db/user_crud.py
+import logging
+from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
+from typing import Optional, List
+import uuid
+from datetime import datetime, timezone
+from pymongo.errors import DuplicateKeyError
+
+from app.models.user import UserCreate, UserInDB, UserUpdate
+from app.core.security import get_password_hash
+
+from motor.motor_asyncio import AsyncIOMotorDatabase
+
+# Nome da coleção de usuários
+USERS_COLLECTION = "users"
+
+# --- Funções CRUD para Usuários ---
+
+async def get_user_by_id(db: AsyncIOMotorDatabase, user_id: uuid.UUID) -> Optional[UserInDB]:
+    """Busca um usuário pelo seu ID (UUID)."""
+    user_dict = await db[USERS_COLLECTION].find_one({"id": str(user_id)})
+    if user_dict:
+        user_dict.pop('_id', None) # Remove _id do mongo
+        try:
+             return UserInDB.model_validate(user_dict)
+        except Exception: # Tratamento básico de erro de validação
+             return None
+    return None
+
+async def get_user_by_username(db: AsyncIOMotorDatabase, username: str) -> Optional[UserInDB]:
+    """Busca um usuário pelo seu nome de usuário."""
+    # Index no 'username' é recomendado para performance
+    user_dict = await db[USERS_COLLECTION].find_one({"username": username})
+    if user_dict:
+         user_dict.pop('_id', None)
+         try:
+            return UserInDB.model_validate(user_dict)
+         except Exception:
+            return None
+    return None
+
+async def get_user_by_email(db: AsyncIOMotorDatabase, email: str) -> Optional[UserInDB]:
+    """Busca um usuário pelo seu e-mail."""
+     # Index no 'email' é recomendado para performance e unicidade
+    user_dict = await db[USERS_COLLECTION].find_one({"email": email})
+    if user_dict:
+        user_dict.pop('_id', None)
+        try:
+            return UserInDB.model_validate(user_dict)
+        except Exception:
+            return None
+    return None
+
+async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional[UserInDB]:
+    """Cria um novo usuário no banco de dados."""
+    hashed_password = get_password_hash(user_in.password)
+
+    user_db_data = {
+        "id": uuid.uuid4(),
+        "username": user_in.username,
+        "email": user_in.email,
+        "hashed_password": hashed_password,
+        "full_name": user_in.full_name,
+        "disabled": False, # Novo usuário começa ativo
+        "created_at": datetime.now(timezone.utc),
+        "updated_at": None
+    }
+    # Tenta validar antes de inserir (boa prática)
+    try:
+        user_db_obj = UserInDB.model_validate(user_db_data)
+    except Exception as validation_error:
+        # Logar validation_error seria importante
+        print(f"Erro de validação Pydantic ao criar user_db_obj: {validation_error}")
+        return None # Ou levantar uma exceção customizada
+
+    # Converte para dicionário para inserir no Mongo
+    user_db_dict = user_db_obj.model_dump(mode="json")
+
+    try:
+        insert_result = await db[USERS_COLLECTION].insert_one(user_db_dict)
+        if not insert_result.acknowledged:
+             # Logar erro
+             return None
+         # Retorna o objeto UserInDB validado (não o dict)
+        return user_db_obj
+    except DuplicateKeyError:
+        # Este erro ocorreria se tivéssemos índices únicos no Mongo
+        # Vamos tratar isso no endpoint que chama esta função
+        raise # Re-lança a exceção para ser tratada na rota
+    except Exception as e:
+         # Logar erro 'e'
+         print(f"Erro inesperado ao inserir usuário no DB: {e}")
+         return None
+
+
+# Adicionar funções de update e delete se necessário
+# async def update_user(...)
+# async def delete_user(...)
+
+# --- Configuração de Índices MongoDB (Importante!) ---
+# Esta função pode ser chamada uma vez na inicialização da aplicação
+# ou você pode criar os índices manualmente no Atlas/Mongo Shell.
+async def create_user_indexes(db: AsyncIOMotorDatabase):
+    """Cria índices únicos para username e email se não existirem."""
+    collection = db[USERS_COLLECTION]
+    try:
+        await collection.create_index("username", unique=True, name="username_unique_idx")
+        await collection.create_index("email", unique=True, name="email_unique_idx")
+        logging.info("Índices de usuário ('username', 'email') verificados/criados.")
+    except Exception as e:
+        logging.error(f"Erro ao criar índices de usuário: {e}")
