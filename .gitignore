@@ -21,3 +21,6 @@ __pycache__/
 build/
 dist/
 *.egg-info/
+
+# Arquivos de teste e debug
+test/
