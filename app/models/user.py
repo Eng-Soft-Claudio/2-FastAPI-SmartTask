@@ -22,10 +22,10 @@ class UserCreate(BaseModel):
         "json_schema_extra": {
             "examples": [
                 {
-                    "email": "johndoe@example.com",
-                    "username": "johndoe",
+                    "email": "userTest@example.com",
+                    "username": "userTest",
                     "password": "averysecurepassword",
-                    "full_name": "John Doe"
+                    "full_name": "User Test"
                 }
             ]
         }
@@ -36,8 +36,6 @@ class UserUpdate(BaseModel):
     email: Optional[EmailStr] = Field(None, title="Endereço de E-mail")
     full_name: Optional[str] = Field(None, title="Nome Completo", max_length=100)
     disabled: Optional[bool] = Field(None, title="Status Desativado")
-    # Não permitimos atualizar username ou senha por este modelo geralmente
-    # Senha teria um endpoint/processo separado
 
 class UserInDBBase(UserBase):
     """Modelo de usuário como armazenado no banco, incluindo ID e senha hasheada."""
@@ -45,19 +43,14 @@ class UserInDBBase(UserBase):
     hashed_password: str = Field(..., title="Senha Hasheada")
     created_at: datetime = Field(default_factory=datetime.now(timezone.utc), title="Data de Criação")
     updated_at: Optional[datetime] = Field(None, title="Data da Última Atualização")
-
-    # Configuração Pydantic v2 para permitir criação a partir de atributos de objeto (ex: do MongoDB)
     model_config = ConfigDict(from_attributes=True)
 
-# Modelo que será retornado pela API (não inclui senha hasheada)
 class User(UserBase):
     """Modelo de usuário para respostas da API (sem senha)."""
     id: uuid.UUID = Field(..., title="ID Único do Usuário")
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), title="Data de Criação")
-    updated_at: Optional[datetime] = Field(None, title="Data da Última Atualização")
-
+    created_at: datetime
+    updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
-# Modelo para representar o usuário armazenado completamente no DB (para uso interno)
 class UserInDB(UserInDBBase):
    pass
