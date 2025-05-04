@@ -7,7 +7,7 @@ import uuid
 import pytest_asyncio
 from app.core.config import settings
 from app.models.task import TaskStatus
-from tests.conftest import auth_headers_a, auth_headers_b
+from datetime import date
 
 pytestmark = pytest.mark.asyncio
 
@@ -20,14 +20,13 @@ base_task_create_data = {
 # ==========================================
 # --- Testes de Criação ---
 # ==========================================
-# Pede a fixture correta: auth_headers_a
 async def test_create_task_success(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] # << CORRIGIDO para User A
+    auth_headers_a: Dict[str, str] 
 ):
     """Testa a criação bem-sucedida de uma tarefa."""
     url = f"{settings.API_V1_STR}/tasks/"
-    response = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a) # << CORRIGIDO
+    response = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a) 
 
     assert response.status_code == status.HTTP_201_CREATED
     response_data = response.json()
@@ -38,15 +37,106 @@ async def test_create_task_success(
     assert "created_at" in response_data
     assert "priority_score" in response_data
 
-async def test_create_task_unauthorized(test_async_client: AsyncClient):
+async def test_create_task_unauthorized(
+        test_async_client: AsyncClient
+):
      """Testa criar tarefa sem autenticação."""
      url = f"{settings.API_V1_STR}/tasks/"
-     response = await test_async_client.post(url, json=base_task_create_data) # Não envia headers
+     response = await test_async_client.post(url, json=base_task_create_data) 
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-# ========================================
+# ==========================================
+# --- Testes de Validação ---
+# ==========================================
+@pytest.mark.parametrize(
+    "field, value, error_type, error_msg_part", [
+        ("title", "T2", "value_error", "String should have at least 3 characters"),
+        ("importance", 0, "greater_than_equal", "Input should be greater than or equal to 1"),
+        ("importance", 6, "less_than_equal", "Input should be less than or equal to 5"),
+        ("due_date", "nao-e-data", "date_parsing", "invalid date format"),
+        ("status", "invalido", "enum", "Input should be"),
+    ]
+)
+
+async def test_create_task_invalid_input(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    field: str, value: Any, error_type: str, error_msg_part: str
+):
+    """Testa criar tarefa com dados inválidos."""
+    invalid_data = base_task_create_data.copy()
+    if value is None:
+         if field in ["title", "importance"]:
+             del invalid_data[field]
+         elif field == "status" and value is None:
+             pytest.skip("Teste 'missing' não aplicável para 'status' com default.") 
+             return
+    else:
+        invalid_data[field] = value
+
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=invalid_data, headers=auth_headers_a)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_details = response.json()["detail"]
+    found_error = False
+    for error in error_details:
+        if field in error.get("loc", []) and error.get("type") == error_type:
+            if error_msg_part in error.get("msg", ""):
+                found_error = True
+                break
+    assert found_error, f"Erro esperado para campo '{field}' tipo '{error_type}' msg '{error_msg_part}' não encontrado em {error_details}"
+
+async def test_update_task_invalid_input(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    field: str, value: Any, error_type: str, error_msg_part: str
+):
+    """Testa atualizar tarefa com dados inválidos."""
+    # Arrange: Criar uma tarefa primeiro
+    url = f"{settings.API_V1_STR}/tasks/"
+    create_resp = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a)
+    assert create_resp.status_code == 201
+    task_id = create_resp.json()["id"]
+
+    # Act: Tentar atualizar com dado inválido
+    invalid_update_payload = {field: value}
+    url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
+    response = await test_async_client.put(url_put, json=invalid_update_payload, headers=auth_headers_a)
+
+    # Assert
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_details = response.json()["detail"]
+    found_error = False
+    for error in error_details:
+        # No PUT, o erro estará aninhado em "body" -> campo
+        if field in error.get("loc", []) and error.get("type") == error_type:
+            if error_msg_part in error.get("msg", ""):
+                found_error = True
+                break
+    assert found_error, f"Erro esperado para campo '{field}' com tipo '{error_type}' e msg contendo '{error_msg_part}' não encontrado em {error_details}"
+
+async def test_update_task_empty_payload(
+     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+):
+    """Testa atualizar tarefa com payload vazio (deve retornar 400)."""
+    # Arrange: Criar tarefa
+    url = f"{settings.API_V1_STR}/tasks/"
+    create_resp = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a)
+    assert create_resp.status_code == 201
+    task_id = create_resp.json()["id"]
+
+    # Act: Tentar atualizar com payload vazio
+    url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
+    response = await test_async_client.put(url_put, json={}, headers=auth_headers_a) # Payload vazio
+
+    # Assert: Esperamos 400 (conforme nossa lógica em update_task)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Nenhum campo válido fornecido" in response.json()["detail"]
+
+# ==========================================
 # --- Testes de Listagem ---
-# ========================================
+# ==========================================
 async def test_list_tasks_success(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
 ):
@@ -70,7 +160,9 @@ async def test_list_tasks_success(
     assert task1["title"] in titles
     assert task2["title"] in titles
 
-async def test_list_tasks_unauthorized(test_async_client: AsyncClient):
+async def test_list_tasks_unauthorized(
+        test_async_client: AsyncClient
+):
      """Testa listar tarefas sem autenticação."""
      url = f"{settings.API_V1_STR}/tasks/"
      response = await test_async_client.get(url)
@@ -96,9 +188,11 @@ async def test_list_tasks_does_not_show_other_users_tasks(
 # --- Testes de Filtros e Ordenação ---
 # ========================================
 
-# Criar uma fixture de dados para facilitar testes de filtro/sort
 @pytest_asyncio.fixture(scope="function")
-async def create_filter_sort_tasks(test_async_client: AsyncClient, auth_headers_a: Dict[str, str]) -> List[Dict]:
+async def create_filter_sort_tasks(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
+) -> List[Dict]:
     """Cria um conjunto de tarefas com variações para testes."""
     url = f"{settings.API_V1_STR}/tasks/"
     tasks_to_create = [
@@ -183,9 +277,6 @@ async def test_list_tasks_sort_by_due_date_asc(
 # ========================================
 # --- Testes GET /tasks/{id} ---
 # ========================================
-###################################################
-# test_get_specific_task_unauthorized <<<<<FALTANDO
-###################################################
 async def test_get_specific_task_success(
     test_async_client: AsyncClient,
     auth_headers_a: Dict[str, str] 
@@ -206,8 +297,6 @@ async def test_get_specific_task_success(
     assert response_data["id"] == task_id
     assert response_data["title"] == base_task_create_data["title"] 
 
-
-# Usa a fixture correta: auth_headers_a
 async def test_get_specific_task_not_found(
     test_async_client: AsyncClient,
     auth_headers_a: Dict[str, str] 
@@ -217,6 +306,15 @@ async def test_get_specific_task_not_found(
     url = f"{settings.API_V1_STR}/tasks/{non_existent_id}"
     response = await test_async_client.get(url, headers=auth_headers_a)
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+async def test_get_specific_task_unauthorized(
+        test_async_client: AsyncClient
+):
+    """Testa buscar tarefa específica sem autenticação."""
+    some_id = uuid.uuid4()
+    url = f"{settings.API_V1_STR}/tasks/{some_id}"
+    response = await test_async_client.get(url) 
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 async def test_get_other_user_task_forbidden(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
@@ -237,7 +335,7 @@ async def test_get_other_user_task_forbidden(
     assert response_b.status_code == status.HTTP_404_NOT_FOUND
 
 # ========================================
-# --- Testes PUT /tasks/{id} (NOVOS) ---
+# --- Testes PUT /tasks/{id} ---
 # ========================================
 async def test_update_task_success(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
@@ -268,7 +366,8 @@ async def test_update_task_success(
     assert data["priority_score"] != original_score
 
 async def test_update_task_not_found(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
 ):
     """Testa atualizar tarefa inexistente."""
     url = f"{settings.API_V1_STR}/tasks/{uuid.uuid4()}" 
@@ -310,27 +409,25 @@ async def test_get_specific_task_success(
     assert response_data["id"] == task_id
     assert response_data["title"] == base_task_create_data["title"]
 
-
-# Pede a fixture correta: auth_headers_a
 async def test_get_specific_task_not_found(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] # << CORRIGIDO para User A
+    auth_headers_a: Dict[str, str] 
 ):
     """Testa buscar uma tarefa com ID inexistente."""
     non_existent_id = uuid.uuid4()
     url = f"{settings.API_V1_STR}/tasks/{non_existent_id}"
-    response = await test_async_client.get(url, headers=auth_headers_a) # << CORRIGIDO
+    response = await test_async_client.get(url, headers=auth_headers_a) 
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
-# Nenhuma mudança necessária
-async def test_get_specific_task_unauthorized(test_async_client: AsyncClient):
+async def test_get_specific_task_unauthorized(
+        test_async_client: AsyncClient
+):
      """Testa buscar tarefa sem autenticação."""
      some_valid_id_placeholder = uuid.uuid4()
      url = f"{settings.API_V1_STR}/tasks/{some_valid_id_placeholder}"
      response = await test_async_client.get(url)
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-# Nenhuma mudança necessária
 async def test_get_other_user_task_forbidden(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
 ):
@@ -371,7 +468,6 @@ async def test_delete_task_success(
     get_response = await test_async_client.get(url_get, headers=auth_headers_a)
     assert get_response.status_code == status.HTTP_404_NOT_FOUND
 
-
 async def test_delete_task_not_found(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
 ):
@@ -379,7 +475,6 @@ async def test_delete_task_not_found(
     url = f"{settings.API_V1_STR}/tasks/{uuid.uuid4()}" # ID aleatório
     response = await test_async_client.delete(url, headers=auth_headers_a)
     assert response.status_code == status.HTTP_404_NOT_FOUND
-
 
 async def test_delete_other_user_task_forbidden(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]

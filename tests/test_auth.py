@@ -2,12 +2,11 @@
 import pytest
 from httpx import AsyncClient
 from fastapi import status
-
-from app.core.config import settings # Para construir URLs
-# --- IMPORTAR DADOS DE USUÁRIO DO CONFTEST ---
+from typing import Dict, Any
+from app.core.config import settings 
 from tests.conftest import user_a_data
 
-# Marca todos os testes neste módulo para usar asyncio
+
 pytestmark = pytest.mark.asyncio
 
 # ==============================
@@ -68,6 +67,50 @@ async def test_register_user_duplicate_email(
     assert response.status_code == status.HTTP_409_CONFLICT
     assert "já registrado" in response.json()["detail"]
 
+# ==============================
+# --- Testes de Validação ---
+# ==============================
+@pytest.mark.parametrize(
+        "field, value, error_type, error_msg_part", [
+            ("email", "não-é-um-email", "value_error", "valid email address"),
+            ("username", "us", "value_error", "String should have at least 3 characters"),
+            ("username", "user name com espaco", "value_error", "string matching regex"),
+            ("password", "curta", "value_error", "String should have at least 8 characters"), 
+            ("email", None, "missing", "Field required"), 
+            ("username", None, "missing", "Field required"),
+            ("password", None, "missing", "Field required"),
+        ]
+)
+
+async def test_register_user_invalid_input(
+    test_async_client: AsyncClient, field: str, value: Any, error_type: str, error_msg_part: str
+):
+    """Testa registro com dados inválidos específicos."""
+    invalid_data = {
+        "email": "valid@example.com",
+        "username": "validusername",
+        "password": "validpassword",
+        "full_name": "Valid Name"
+    }
+    if value is None:
+        if field in invalid_data:
+           del invalid_data[field]
+    else:
+        invalid_data[field] = value
+
+    url = f"{settings.API_V1_STR}/auth/register"
+    response = await test_async_client.post(url, json=invalid_data)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_details = response.json()["detail"]
+    found_error = False
+    for error in error_details:
+        if field in error.get("loc", []) and error.get("type") == error_type:
+             if error_msg_part in error.get("msg", ""):
+                  found_error = True
+                  break
+    assert found_error, f"Erro esperado para campo '{field}' com tipo '{error_type}' e msg contendo '{error_msg_part}' não encontrado em {error_details}"
+
 # ========================
 # --- Testes de Login ---
 # ========================
@@ -99,11 +142,13 @@ async def test_login_wrong_password(
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
      assert "incorretos" in response.json()["detail"]
 
-async def test_login_user_not_found(test_async_client: AsyncClient):
-     """Testa login com usuário inexistente."""
-     login_data = {"username": "nonexistentuser", "password": "password"}
-     url = f"{settings.API_V1_STR}/auth/login/access-token"
+async def test_login_user_not_found(
+        test_async_client: AsyncClient
+):
+    """Testa login com usuário inexistente."""
+    login_data = {"username": "nonexistentuser", "password": "password"}
+    url = f"{settings.API_V1_STR}/auth/login/access-token"
 
-     response = await test_async_client.post(url, data=login_data)
+    response = await test_async_client.post(url, data=login_data)
 
-     assert response.status_code == status.HTTP_401_UNAUTHORIZED # Mesmo erro para user/pwd errados
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED 
