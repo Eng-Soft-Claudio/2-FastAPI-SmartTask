@@ -2,9 +2,9 @@
 
 # --- Importações Essenciais ---
 import logging
-from typing import List, Optional, Annotated 
-import uuid 
-from datetime import date, datetime, timezone 
+from typing import List, Optional, Annotated
+import uuid
+from datetime import date, datetime, timezone
 
 # --- Imports do FastAPI ---
 from fastapi import (
@@ -13,60 +13,52 @@ from fastapi import (
 )
 
 # --- Imports do MongoDB/Motor ---
-from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
-from pymongo import DESCENDING, ASCENDING
-from pymongo.errors import DuplicateKeyError
+from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import ValidationError 
 
 # --- Imports da Nossa Aplicação ---
-from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus 
-from app.db import task_crud 
-from app.db.mongodb_utils import get_database 
+from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus
+from app.db import task_crud
+from app.db.mongodb_utils import get_database
 from app.core.dependencies import CurrentUser
-from app.models.user import UserInDB 
-from app.core.utils import calculate_priority_score, is_task_urgent, send_webhook_notification 
+from app.models.user import UserInDB
+from app.core.utils import calculate_priority_score, is_task_urgent, send_webhook_notification
 
 # --- Instanciar Logger ---
 logger = logging.getLogger(__name__)
 
 # --- Configuração do Roteador ---
 router = APIRouter(
-    prefix="/tasks", 
-    tags=["Tasks"], 
-    responses={ 
+    prefix="/tasks",
+    tags=["Tasks"],
+    responses={
         status.HTTP_404_NOT_FOUND: {"description": "Tarefa não encontrada"},
         status.HTTP_401_UNAUTHORIZED: {"description": "Não autorizado (Token inválido ou ausente)"},
         status.HTTP_403_FORBIDDEN: {"description": "Proibido (Usuário não tem permissão para este recurso)"}
     },
 )
 
-# --- Dependências Tipadas para Melhor Legibilidade ---
+# --- Dependência de Banco de Dados (Simplificada) ---
 DbDep = Annotated[AsyncIOMotorDatabase, Depends(get_database)]
-
-# Função auxiliar para obter a coleção de tarefas (simplifica injeção)
-async def get_task_collection(db: DbDep) -> AsyncIOMotorCollection:
-    """Retorna a coleção MongoDB 'tasks'."""
-    return db[task_crud.TASKS_COLLECTION]
-TaskCollectionDep = Annotated[AsyncIOMotorCollection, Depends(get_task_collection)]
-
 
 # ==============================================================================
 # --- ROTAS CRUD PROTEGIDAS PARA TAREFAS ---
+# (Agora utilizando app.db.task_crud)
 # ==============================================================================
 
 @router.post(
     "/",
-    response_model=Task, 
-    status_code=status.HTTP_201_CREATED, 
+    response_model=Task,
+    status_code=status.HTTP_201_CREATED,
     summary="Cria uma nova tarefa",
     description="Cria uma nova tarefa associada ao usuário autenticado. A prioridade e owner_id são definidos automaticamente.",
     response_description="A tarefa recém-criada com todos os seus detalhes.",
 )
 async def create_task(
-    task_in: Annotated[TaskCreate, Body(description="Dados da nova tarefa a ser criada")], 
-    collection: TaskCollectionDep, 
-    current_user: CurrentUser, 
-    background_tasks: BackgroundTasks 
+    task_in: Annotated[TaskCreate, Body(description="Dados da nova tarefa a ser criada")],
+    db: DbDep, 
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks
 ):
     """
     Endpoint para criar uma nova tarefa.
@@ -74,77 +66,53 @@ async def create_task(
     - Recebe dados validados pelo modelo `TaskCreate`.
     - Calcula a `priority_score`.
     - Associa a tarefa ao `owner_id` do usuário logado.
-    - Salva no MongoDB.
-    - Envia notificações (e-mail, webhook) em background se necessário.
+    - Chama `task_crud.create_task` para salvar no MongoDB.
+    - Envia notificações (webhook) em background se necessário.
     - Retorna a tarefa criada.
     """
-    # Converte dados de entrada Pydantic para dicionário, excluindo campos não enviados
     task_data = task_in.model_dump(exclude_unset=True)
 
     # --- Calcular Prioridade ---
-    # Usa a função utilitária com os dados recebidos
     priority = calculate_priority_score(
         importance=task_in.importance,
         due_date=task_in.due_date
     )
 
-    # --- Criar o objeto Tarefa completo para o DB ---
-    task_db = Task(
-        id=uuid.uuid4(),                  
-        owner_id=current_user.id,          
-        created_at=datetime.now(timezone.utc), 
-        priority_score=priority,           
-        **task_data                        
-    )
-
-    # Converte o objeto Pydantic para dicionário antes de inserir no MongoDB
-    task_db_dict = task_db.model_dump(mode="json")
-
+    # --- Criar o objeto Tarefa completo ---
     try:
-        # --- Inserir no Banco de Dados ---
-        insert_result = await collection.insert_one(task_db_dict)
-        if not insert_result.acknowledged:
-             logger.error("Falha no ACK ao inserir tarefa no MongoDB.")
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Falha ao salvar a tarefa no banco de dados.")
-
-        # --- Disparar Tarefas em Background (Após Sucesso no DB) ---
-
-        # 1. Webhook 
-        task_dict_for_webhook = task_db.model_dump(mode="json") 
-        background_tasks.add_task( 
-             send_webhook_notification, 
-             event_type="task.created",
-             task_data=task_dict_for_webhook 
+        task_db_obj = Task(
+            id=uuid.uuid4(),
+            owner_id=current_user.id,
+            created_at=datetime.now(timezone.utc),
+            priority_score=priority,
+            **task_data
         )
-        logger.info(f"Tarefa de webhook 'task.created' para {task_db.id} adicionada ao background.")
+    except ValidationError as e:
+         logger.error(f"Erro de validação Pydantic ao montar Task para criação: {e}")
+         raise HTTPException(
+             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+             detail=f"Erro interno na validação dos dados da tarefa: {e}"
+         )
 
-        # 2. Notificação por E-mail (se urgente e usuário configurado)
-        # A lógica de envio de email em si não está implementada aqui, assumindo
-        # que o worker ARQ cuida disso periodicamente.
-        # Se quiséssemos enviar email *imediatamente* na criação/update:
-        # if is_task_urgent(task_db):
-        #     if current_user.email and current_user.full_name:
-        #          background_tasks.add_task( # Também rodaria em background
-        #              send_urgent_task_notification,
-        #              user_email=current_user.email,
-        #              # ... outros args ...
-        #          )
-        #          logger.info(f"Tarefa de email urgente para {task_db.id} adicionada ao background.")
-        #     else:
-        #          logger.warning(f"Usuário {current_user.id} sem e-mail/nome para notificação IMEDIATA da tarefa urgente {task_db.id}.")
+    # --- Inserir no Banco de Dados via CRUD ---
+    created_task = await task_crud.create_task(db=db, task_db=task_db_obj)
+
+    if created_task is None:
+         logger.error(f"Falha ao criar tarefa no banco de dados para usuário {current_user.id}.")
+         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                            detail="Falha ao salvar a tarefa no banco de dados.")
+
+    # --- Disparar Tarefas em Background ---
+    task_dict_for_webhook = created_task.model_dump(mode="json")
+    background_tasks.add_task(
+         send_webhook_notification,
+         event_type="task.created",
+         task_data=task_dict_for_webhook
+    )
+    logger.info(f"Tarefa de webhook 'task.created' para {created_task.id} adicionada ao background.")
 
 
-    except DuplicateKeyError:
-        logger.warning(f"Tentativa de criar tarefa duplicada para user {current_user.id}")
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT,
-                            detail="Uma tarefa com identificador semelhante já existe para este usuário.")
-    except Exception as e: 
-        logger.exception(f"Erro inesperado ao criar tarefa ou agendar background tasks para user {current_user.id}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Ocorreu um erro interno ao processar a criação da tarefa.")
-
-    return task_db
+    return created_task
 
 
 @router.get(
@@ -157,85 +125,39 @@ async def create_task(
     response_description="Uma lista (possivelmente vazia) contendo as tarefas filtradas e ordenadas do usuário.",
 )
 async def list_tasks(
-    collection: TaskCollectionDep,
-    current_user: CurrentUser, 
+    db: DbDep, 
+    current_user: CurrentUser,
     # --- Parâmetros de Filtro ---
-    status_filter: Annotated[Optional[TaskStatus], Query(
-        alias="status", title="Filtro por Status",
-        description="Filtrar tarefas por um status específico."
-    )] = None,
-    due_before: Annotated[Optional[date], Query(
-        title="Vencimento Antes De",
-        description="Filtrar tarefas com prazo de vencimento até esta data (inclusive)."
-    )] = None,
-    project_filter: Annotated[Optional[str], Query(
-        alias="project", title="Filtro por Projeto",
-        description="Filtrar tarefas por nome exato do projeto.", min_length=1
-    )] = None,
-    tags_filter: Annotated[Optional[List[str]], Query(
-        alias="tag", title="Filtro por Tags (AND)",
-        description="Filtrar tarefas que contenham TODAS as tags especificadas (usar ?tag=t1&tag=t2).", min_length=1
-    )] = None,
+    status_filter: Annotated[Optional[TaskStatus], Query(alias="status")] = None,
+    due_before: Annotated[Optional[date], Query()] = None,
+    project_filter: Annotated[Optional[str], Query(alias="project", min_length=1)] = None,
+    tags_filter: Annotated[Optional[List[str]], Query(alias="tag", min_length=1)] = None,
     # --- Parâmetros de Ordenação ---
-    sort_by: Annotated[Optional[str], Query(
-        title="Ordenar Por",
-        description="Campo para ordenar: 'priority_score', 'due_date', 'created_at', 'importance'.",
-        enum=["priority_score", "due_date", "created_at", "importance"] 
-    )] = None,
-    sort_order: Annotated[Optional[str], Query(
-        title="Ordem",
-        description="Ordem da ordenação: 'asc' ou 'desc'.",
-        enum=["asc", "desc"] 
-    )] = "desc", 
+    sort_by: Annotated[Optional[str], Query(enum=["priority_score", "due_date", "created_at", "importance"])] = None,
+    sort_order: Annotated[Optional[str], Query(enum=["asc", "desc"])] = "desc",
     # --- Parâmetros de Paginação ---
-    limit: Annotated[int, Query(ge=1, le=1000, title="Limite de Resultados", description="Número máximo de tarefas a retornar.")] = 100,
-    skip: Annotated[int, Query(ge=0, title="Pular Resultados", description="Número de tarefas a pular (para paginação).")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+    skip: Annotated[int, Query(ge=0)] = 0,
 ):
     """
     Endpoint para listar tarefas do usuário autenticado com filtros, ordenação e paginação.
+    Delega a busca para `task_crud.get_tasks_by_owner`.
     """
-    query = {"owner_id": str(current_user.id)}
+    # --- Chamar a função CRUD para buscar as tarefas ---
+    tasks = await task_crud.get_tasks_by_owner(
+        db=db,
+        owner_id=current_user.id,
+        status_filter=status_filter,
+        due_before=due_before,
+        project_filter=project_filter,
+        tags_filter=tags_filter,
+        sort_by=sort_by,
+        sort_order=sort_order or "desc", 
+        limit=limit,
+        skip=skip
+    )
 
-    # --- Adicionar Filtros Opcionais à Query MongoDB ---
-    if status_filter:
-        query["status"] = status_filter.value 
-    if due_before:
-        query["due_date"] = {"$lte": datetime.combine(due_before, datetime.min.time(), tzinfo=timezone.utc)} 
-    if project_filter:
-        query["project"] = project_filter 
-    if tags_filter:
-        query["tags"] = {"$all": tags_filter}
-
-    # --- Determinar Campo e Ordem de Ordenação ---
-    sort_tuple = None
-    if sort_by in ["priority_score", "due_date", "created_at", "importance"]:
-        mongo_order = DESCENDING if sort_order.lower() == "desc" else ASCENDING
-        sort_tuple = (sort_by, mongo_order)
-
-    # --- Executar Query com Paginação e Ordenação ---
-    try:
-        tasks_cursor = collection.find(query).skip(skip).limit(limit)
-        if sort_tuple:
-            tasks_cursor = tasks_cursor.sort([sort_tuple]) 
-
-        # --- Processar e Validar Resultados ---
-        validated_tasks = []
-        async for task_dict in tasks_cursor:
-            task_dict.pop('_id', None) 
-            try:
-                # Valida cada dicionário retornado com o modelo Pydantic Task
-                validated_tasks.append(Task.model_validate(task_dict))
-            except (ValidationError, Exception) as e:
-                logger.error(f"Erro ao validar tarefa do DB (list {current_user.id}): {task_dict} - Erro: {e}")
-                # Em produção, decidir se continua ou retorna erro parcial
-                continue # Pula tarefa inválida por enquanto
-
-        return validated_tasks
-
-    except Exception as e: 
-        logger.exception(f"Erro ao buscar/processar tarefas para user {current_user.id} com query {query}: {e}")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                            detail="Ocorreu um erro interno ao buscar as tarefas.")
+    return tasks
 
 
 @router.get(
@@ -247,33 +169,23 @@ async def list_tasks(
     responses={status.HTTP_403_FORBIDDEN: {"description": "Acesso negado a esta tarefa"}}
 )
 async def get_task(
-    task_id: uuid.UUID, 
-    collection: TaskCollectionDep,
-    current_user: CurrentUser 
+    task_id: uuid.UUID,
+    db: DbDep, 
+    current_user: CurrentUser
 ):
     """
     Endpoint para buscar uma única tarefa pelo seu ID (UUID).
-    Apenas retorna a tarefa se o ID for encontrado E pertencer ao usuário logado.
+    Delega a busca para `task_crud.get_task_by_id`, que já inclui a verificação do owner.
     """
-    # Busca no MongoDB usando o ID da tarefa e o ID do usuário logado
-    task_dict = await collection.find_one({
-        "id": str(task_id),          
-        "owner_id": str(current_user.id) 
-    })
+    # --- Buscar a tarefa via CRUD ---
+    task = await task_crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
 
-    if task_dict:
-        task_dict.pop('_id', None) 
-        try:
-            # Valida os dados do DB com o modelo Pydantic Task
-            return Task.model_validate(task_dict)
-        except (ValidationError, Exception) as e:
-            logger.error(f"Erro ao validar tarefa {task_id} do DB para user {current_user.id}: {e}")
-            # Pode indicar inconsistência de dados no DB
-            raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Erro ao processar dados da tarefa encontrada.")
-    else:
+    if task is None:
+        logger.warning(f"Tentativa de acesso à tarefa {task_id} falhou ou tarefa não encontrada para usuário {current_user.id}.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Tarefa com ID {task_id} não encontrada.")
+
+    return task
 
 
 @router.put(
@@ -285,126 +197,91 @@ async def get_task(
     responses={status.HTTP_403_FORBIDDEN: {"description": "Acesso negado a esta tarefa"}}
 )
 async def update_task(
-    task_id: uuid.UUID, 
-    task_update: Annotated[TaskUpdate, Body(description="Campos da tarefa a serem atualizados")], 
-    collection: TaskCollectionDep,
+    task_id: uuid.UUID,
+    task_update: Annotated[TaskUpdate, Body(description="Campos da tarefa a serem atualizados")],
+    db: DbDep, 
     current_user: CurrentUser,
-    background_tasks: BackgroundTasks 
+    background_tasks: BackgroundTasks
 ):
     """
     Endpoint para atualizar campos específicos de uma tarefa.
 
-    - Verifica se a tarefa pertence ao usuário.
+    - Busca a tarefa existente para obter os valores atuais (necessário para recalcular prioridade).
     - Recebe dados validados pelo modelo `TaskUpdate`.
+    - Prepara dicionário `update_data` apenas com campos enviados.
     - Recalcula `priority_score` se `importance` ou `due_date` mudarem.
-    - Atualiza o campo `updated_at`.
-    - Salva as alterações no MongoDB.
+    - Adiciona `updated_at`.
+    - Chama `task_crud.update_task` para salvar no MongoDB.
     - Envia webhook em background.
     - Retorna a tarefa completa e atualizada.
     """
-    # --- Garantir que a tarefa existe e pertence ao usuário antes de prosseguir ---
-    existing_task_dict = await collection.find_one({
-        "id": str(task_id),
-        "owner_id": str(current_user.id)
-    })
-    if not existing_task_dict:
-        # Levanta 404 (ou 403 se preferíssemos verificar a existência geral)
+    # --- Obter Tarefa Existente ---
+    existing_task = await task_crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
+    if not existing_task:
+        logger.warning(f"Tentativa de atualizar tarefa {task_id} não encontrada para usuário {current_user.id}.")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
-                             detail=f"Tarefa {task_id} não encontrada ou não pertence a você.")
-
-    # Validar tarefa existente para fácil acesso aos campos com tipos corretos
-    try:
-         existing_task = Task.model_validate(existing_task_dict)
-    except Exception:
-        logger.exception(f"Erro ao validar dados da tarefa existente {task_id} antes do update.")
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                detail="Erro interno ao processar dados da tarefa existente.")
+                            detail=f"Tarefa {task_id} não encontrada ou não pertence a você.")
 
     # --- Preparar Dados para Atualização ---
-    # Pega apenas os campos que foram explicitamente enviados no request 
-    update_data = task_update.model_dump(exclude_unset=True, exclude={"owner_id"}) 
+    update_data_from_request = task_update.model_dump(exclude_unset=True)
 
-    # Se nenhum campo válido foi enviado para atualização
-    if not update_data:
+    if not update_data_from_request:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,
                             detail="Nenhum campo válido fornecido para atualização.")
 
     # --- Recalcular Prioridade (se necessário) ---
     should_recalculate_priority = False
-    current_importance = existing_task.importance
-    current_due_date = existing_task.due_date
+    new_importance = update_data_from_request.get("importance", existing_task.importance)
+    new_due_date = update_data_from_request.get("due_date", existing_task.due_date) \
+                    if "due_date" in update_data_from_request else existing_task.due_date
 
-    # Verifica se os campos relevantes para prioridade foram enviados na atualização
-    if "importance" in update_data and update_data["importance"] != current_importance:
-        current_importance = update_data["importance"] 
+    # Verifica se os campos relevantes foram alterados
+    if "importance" in update_data_from_request and update_data_from_request["importance"] != existing_task.importance:
         should_recalculate_priority = True
-    if "due_date" in update_data:
-        new_due_date_obj = update_data["due_date"] 
-        if new_due_date_obj != current_due_date:
-            current_due_date = new_due_date_obj 
-            should_recalculate_priority = True
+    if "due_date" in update_data_from_request and new_due_date != existing_task.due_date:
+        should_recalculate_priority = True
 
-    # Recalcula se algum dos campos chave mudou
+    # Dicionário final a ser passado para o $set no CRUD
+    update_data_for_db = update_data_from_request.copy()
+
     if should_recalculate_priority:
-         priority = calculate_priority_score(
-            importance=current_importance,
-            due_date=current_due_date     
+         new_priority = calculate_priority_score(
+            importance=new_importance,
+            due_date=new_due_date
          )
-         update_data["priority_score"] = priority 
-         logger.info(f"Recalculada prioridade para tarefa {task_id} para: {priority}")
+         update_data_for_db["priority_score"] = new_priority
+         logger.info(f"Recalculada prioridade para tarefa {task_id} para: {new_priority}")
 
-    # --- Definir Timestamp de Atualização ---
-    update_data["updated_at"] = datetime.now(timezone.utc)
+    # --- Executar Atualização via CRUD ---
+    updated_task = await task_crud.update_task(
+        db=db,
+        task_id=task_id,
+        owner_id=current_user.id,
+        update_data=update_data_for_db 
+    )
 
-    # --- Executar Atualização Atômica no Banco de Dados ---
-    try:
-        updated_task_dict_raw = await collection.find_one_and_update(
-            {"id": str(task_id), "owner_id": str(current_user.id)}, 
-            {"$set": update_data}, 
-            return_document=True 
-        )
+    if updated_task is None:
+         logger.error(f"Falha ao atualizar tarefa {task_id} no banco de dados para usuário {current_user.id}.")
+         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                            detail=f"Não foi possível atualizar a tarefa {task_id} (pode ter sido deletada).")
 
-        if not updated_task_dict_raw:
-             logger.error(f"Falha ao encontrar a tarefa {task_id} durante find_one_and_update, após verificação inicial.")
-             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Tarefa {task_id} não encontrada durante a atualização.")
+    # --- Disparar Tarefas em Background ---
+    task_dict_for_webhook = updated_task.model_dump(mode="json")
+    background_tasks.add_task(
+        send_webhook_notification,
+        event_type="task.updated",
+        task_data=task_dict_for_webhook
+    )
+    logger.info(f"Tarefa de webhook 'task.updated' para {updated_task.id} adicionada ao background.")
 
-        # --- Processar Resultado e Enviar Webhook ---
-        updated_task_dict_raw.pop('_id', None)
-        try:
-            updated_task = Task.model_validate(updated_task_dict_raw) 
-
-            # Enviar Webhook em Background
-            task_dict_for_webhook = updated_task.model_dump(mode="json")
-            background_tasks.add_task(
-                send_webhook_notification,
-                event_type="task.updated",
-                task_data=task_dict_for_webhook
-            )
-            logger.info(f"Tarefa de webhook 'task.updated' para {updated_task.id} adicionada ao background.")
-
-            # Notificação por e-mail imediata poderia ser adicionada aqui também (via background_tasks) se necessário
-
-            return updated_task 
-
-        except (ValidationError, Exception) as e:
-             logger.error(f"Erro ao validar tarefa atualizada do DB (ID: {task_id}) para user {current_user.id}: {e}")
-             # Se a validação falhar após o update, indica um problema sério
-             raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                                 detail="Erro ao processar dados da tarefa após atualização.")
-
-    except Exception as e: 
-         logger.exception(f"Erro ao atualizar tarefa {task_id} ou agendar background tasks: {e}")
-         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             detail="Erro interno ao processar atualização da tarefa.")
-
+    return updated_task
 
 
 @router.delete(
     "/{task_id}",
-    status_code=status.HTTP_204_NO_CONTENT, 
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Deleta uma tarefa",
     description="Remove permanentemente uma tarefa do banco de dados, **se** ela pertencer ao usuário autenticado.",
-    # Documenta explicitamente os erros além dos globais
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "Tarefa não encontrada ou não pertence a você"},
         status.HTTP_403_FORBIDDEN: {"description": "Acesso negado a esta tarefa"},
@@ -413,22 +290,20 @@ async def update_task(
 )
 async def delete_task(
     task_id: uuid.UUID,
-    collection: TaskCollectionDep,
-    current_user: CurrentUser 
-    # Nota: Não precisamos de BackgroundTasks aqui, mas poderia ter para um evento 'task.deleted'
+    db: DbDep, 
+    current_user: CurrentUser
 ):
     """
     Endpoint para deletar uma tarefa.
-    Só permite deletar tarefas que pertencem ao usuário logado.
+    Delega a deleção para `task_crud.delete_task`.
     """
-    # Tenta deletar o documento que combina ID da tarefa E ID do usuário
-    delete_result = await collection.delete_one({
-        "id": str(task_id),
-        "owner_id": str(current_user.id) 
-    })
+    # --- Tentar deletar via CRUD ---
+    deleted = await task_crud.delete_task(db=db, task_id=task_id, owner_id=current_user.id)
 
-    # Verifica se algum documento foi realmente deletado
-    if delete_result.deleted_count == 0:
+    if not deleted:
+         # Função CRUD retorna False se delete_one não deletou nada (count 0)
+         logger.warning(f"Tentativa de deletar tarefa {task_id} não encontrada para usuário {current_user.id}.")
          raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                             detail=f"Tarefa com ID {task_id} não encontrada ou não pertence a você.")
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
