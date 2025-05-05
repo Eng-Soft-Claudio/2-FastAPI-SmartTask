@@ -17,6 +17,7 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import ValidationError 
 
 # --- Imports da Nossa Aplicação ---
+from app.core.email import send_urgent_task_notification
 from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus
 from app.db import task_crud
 from app.db.mongodb_utils import get_database
@@ -111,6 +112,20 @@ async def create_task(
     )
     logger.info(f"Tarefa de webhook 'task.created' para {created_task.id} adicionada ao background.")
 
+    if is_task_urgent(created_task):
+        if current_user.email and current_user.full_name:
+            logger.info(f"Tarefa {created_task.id} é urgente, agendando email imediato para {current_user.email}")
+            background_tasks.add_task(
+                send_urgent_task_notification,
+                user_email=current_user.email,
+                user_name=current_user.full_name,
+                task_title=created_task.title,
+                task_id=str(created_task.id),
+                task_due_date=str(created_task.due_date) if created_task.due_date else None,
+                priority_score=created_task.priority_score or 0.0
+            )
+        else:
+             logger.warning(f"Usuário {current_user.id} sem e-mail/nome para notificação IMEDIATA da tarefa urgente {created_task.id}.")
 
     return created_task
 

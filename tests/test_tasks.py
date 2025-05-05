@@ -3,6 +3,7 @@
 # --- Importações ---
 # ==========================================
 import unittest.mock
+from unittest.mock import AsyncMock, ANY
 from freezegun import freeze_time
 import pytest
 from httpx import AsyncClient
@@ -964,3 +965,84 @@ async def test_list_tasks_filter_regex_injection(
     found_literal_match = any(task.get("project") == payload_str for task in tasks)
     assert not found_literal_match or len(tasks) == 0, \
            "Injeção de Regex parece ter encontrado resultados inesperados ou foi tratada literalmente."
+    
+# ================================================
+# --- Testes de Notificação Imediata de E-mail ---
+# ================================================
+
+@freeze_time("2025-05-04") 
+async def test_create_task_triggers_immediate_urgent_email(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    mocker, 
+):
+    """
+    Testa se a criação de uma tarefa claramente urgente dispara
+    a background task para envio imediato de e-mail.
+    """
+    # Mockar a função de envio de email que é chamada pela rota
+    mock_send_email = mocker.patch(
+        "app.routers.tasks.send_urgent_task_notification",
+        new_callable=AsyncMock
+    )
+    # Mockar is_task_urgent para garantir que ela retorne True neste teste
+    mocker.patch("app.routers.tasks.is_task_urgent", return_value=True)
+
+    urgent_task_payload = {
+        "title": "Tarefa Super Urgente Imediata",
+        "description": "Precisa de email agora",
+        "importance": 5,
+        "due_date": (date.today() - timedelta(days=1)).isoformat() 
+    }
+
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=urgent_task_payload, headers=auth_headers_a)
+
+    # Verifica a criação da tarefa
+    assert response.status_code == status.HTTP_201_CREATED
+    created_task_data = response.json()
+
+    # Verifica se a função de envio de email foi chamada na background task
+    mock_send_email.assert_called_once()
+
+    # Verificar alguns argumentos chave passados para a função mockada
+    call_args = mock_send_email.call_args.kwargs
+    assert call_args["user_email"] == user_a_data["email"] 
+    assert call_args["task_title"] == urgent_task_payload["title"]
+    assert call_args["task_id"] == created_task_data["id"]
+
+
+@freeze_time("2025-05-04") 
+async def test_create_task_does_not_trigger_immediate_non_urgent_email(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    mocker, 
+):
+    """
+    Testa se a criação de uma tarefa claramente NÃO urgente NÃO dispara
+    a background task para envio imediato de e-mail.
+    """
+    # Mockar a função de envio de email
+    mock_send_email = mocker.patch(
+        "app.routers.tasks.send_urgent_task_notification",
+        new_callable=AsyncMock
+    )
+    # Mockar is_task_urgent para garantir que retorne False
+    mocker.patch("app.routers.tasks.is_task_urgent", return_value=False)
+
+    # Dados para uma tarefa que NÃO deve ser urgente
+    non_urgent_task_payload = {
+        "title": "Tarefa Não Urgente Imediata",
+        "description": "Sem pressa",
+        "importance": 1,
+        "due_date": (date.today() + timedelta(days=30)).isoformat() 
+    }
+
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=non_urgent_task_payload, headers=auth_headers_a)
+
+    # Verifica a criação da tarefa
+    assert response.status_code == status.HTTP_201_CREATED
+
+    # Verifica que a função de envio de email NÃO foi chamada
+    mock_send_email.assert_not_called()
