@@ -3,9 +3,10 @@ import uuid
 import pytest
 from httpx import AsyncClient
 from fastapi import status
-from typing import Any
+from typing import Any, Dict
 from app.core.config import settings 
 from tests.conftest import user_a_data
+from app.models.user import User
 
 
 pytestmark = pytest.mark.asyncio
@@ -149,9 +150,9 @@ async def test_register_user_invalid_input(
                   break
     assert found_error, f"Erro esperado para campo '{field}' com tipo '{error_type}' e msg contendo '{error_msg_part}' não encontrado em {error_details}"
 
-# ========================
+# =============================
 # --- Testes de Login ---
-# ========================
+# =============================
 async def test_login_success(
     test_async_client: AsyncClient,
     test_user_a_token_and_id: tuple[str, uuid.UUID]
@@ -196,3 +197,37 @@ async def test_login_user_not_found(
     response = await test_async_client.post(url, data=login_data)
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED 
+
+# =============================
+# --- Testes de User /me ---
+# =============================
+
+async def test_read_users_me_success(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str], 
+    test_user_a_token_and_id: tuple[str, uuid.UUID] 
+):
+    """Testa obter dados do usuário logado com sucesso."""
+    url = f"{settings.API_V1_STR}/auth/users/me"
+    _, expected_user_id = test_user_a_token_and_id 
+
+    response = await test_async_client.get(url, headers=auth_headers_a)
+
+    assert response.status_code == status.HTTP_200_OK
+    user_data = response.json()
+    # Verifica se os campos esperados do modelo User (sem senha) estão presentes
+    assert user_data["id"] == str(expected_user_id) 
+    assert user_data["email"] == user_a_data["email"]
+    assert user_data["username"] == user_a_data["username"]
+    assert user_data["full_name"] == user_a_data["full_name"]
+    assert "disabled" in user_data
+    assert "hashed_password" not in user_data 
+    assert "created_at" in user_data
+
+async def test_read_users_me_unauthorized(test_async_client: AsyncClient):
+    """Testa acessar /users/me sem autenticação."""
+    url = f"{settings.API_V1_STR}/auth/users/me"
+    response = await test_async_client.get(url)
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "Not authenticated" in response.json()["detail"] 
+
