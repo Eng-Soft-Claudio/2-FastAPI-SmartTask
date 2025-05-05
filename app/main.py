@@ -8,6 +8,7 @@ from app.routers import tasks
 from app.routers import auth
 from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
+from app.db.task_crud import create_task_indexes
 from app.core.config import settings
 
 # Configuração básica de logging
@@ -18,14 +19,27 @@ logger = logging.getLogger(__name__)
 # Docs: https://fastapi.tiangolo.com/advanced/events/#lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    db = await connect_to_mongo()
-    app.state.db = db
-    if app.state.db is not None:
-         await create_user_indexes(app.state.db)
+    db_connection = await connect_to_mongo()
+    if db_connection is None:
+         logger.critical("Falha fatal ao conectar ao MongoDB na inicialização.")
+         yield 
+         return
 
+    app.state.db = db_connection
+    logger.info("Conectado ao MongoDB.")
+    try:
+        db_instance = app.state.db
+        await create_user_indexes(db_instance)
+        await create_task_indexes(db_instance) 
+    except Exception as e:
+        logger.error(f"Erro durante a criação de índices: {e}", exc_info=True)
+
+    # Permite que a aplicação rode
     yield
-    
+
+    # Código de shutdown (executa ao parar a app)
     await close_mongo_connection()
+    logger.info("Conexão com MongoDB fechada.")
     
 # Instância FastAPI
 app = FastAPI(

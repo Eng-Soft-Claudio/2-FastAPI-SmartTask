@@ -1,4 +1,5 @@
 # app/db/task_crud.py
+import logging
 import uuid
 from datetime import date, datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
@@ -157,3 +158,23 @@ async def delete_task(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uu
     except Exception as e:
         print(f"DB Error deleting task {task_id}: {e}") 
         return False
+    
+async def create_task_indexes(db: AsyncIOMotorDatabase):
+    """Cria índices importantes para a coleção de tarefas se não existirem."""
+    collection = _get_tasks_collection(db) 
+    try:
+        await collection.create_index("id", unique=True, name="task_id_unique_idx")
+        await collection.create_index("owner_id", name="task_owner_idx")
+        await collection.create_index(
+            [("owner_id", ASCENDING), ("due_date", DESCENDING)], 
+            name="task_owner_due_date_idx"
+        )
+        await collection.create_index(
+            [("owner_id", ASCENDING), ("priority_score", DESCENDING)], 
+            name="task_owner_priority_idx"
+        )
+        await collection.create_index("tags", name="task_tags_idx")
+
+        logging.info("Índices da coleção 'tasks' verificados/criados.")
+    except Exception as e:
+        logging.error(f"Erro ao criar índices da coleção 'tasks': {e}")
