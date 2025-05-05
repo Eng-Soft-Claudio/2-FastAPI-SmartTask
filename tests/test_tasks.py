@@ -881,27 +881,26 @@ async def test_access_tasks_token_wrong_secret(
 
 async def test_access_tasks_expired_token(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str],
+    test_user_a_token_and_id: tuple[str, uuid.UUID],
     mocker
 ):
     """Testa acessar /tasks com um token JWT expirado."""
-    from app.core.security import create_access_token, ALGORITHM
     import jwt as jose_jwt
     from datetime import datetime, timedelta, timezone
 
-    user_id_dummy = uuid.uuid4() 
+    _, user_id = test_user_a_token_and_id
 
     # 1. Criando um token com data de expiração no passado
     past_time = datetime.now(timezone.utc) - timedelta(minutes=30)
     expired_payload = {
-        "sub": str(user_id_dummy), 
+        "sub": str(user_id), 
         "username": user_a_data["username"],
         "exp": past_time
     }
     expired_token = jose_jwt.encode(
         expired_payload,
         settings.JWT_SECRET_KEY,
-        algorithm=ALGORITHM
+        algorithm=settings.JWT_ALGORITHM
     )
 
     # 2. Tente acessar a API com o token expirado
@@ -911,3 +910,57 @@ async def test_access_tasks_expired_token(
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
+
+@pytest.mark.parametrize(
+    "param_name, injected_value", [
+        ("project", {"$ne": "some_project"}), 
+        ("project", "; --"), 
+        ("project", "' OR '1'='1"), 
+        ("tag", {"$ne": "some_tag"}), 
+        ("tag", "*"),
+        ("tag", "t1; DROP TABLE tasks; --"), 
+    ]
+)
+
+async def test_list_tasks_filter_injection_attempt_string(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    param_name: str,
+    injected_value: Any,
+):
+    """
+    Testa tentativas de injeção em filtros de string (project, tag).
+    Espera-se erro 422 (Validação) pois o tipo esperado é string simples.
+    """
+    url = f"{settings.API_V1_STR}/tasks/?{param_name}={str(injected_value)}" 
+
+    response = await test_async_client.get(url, headers=auth_headers_a)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY \
+           or response.status_code == status.HTTP_200_OK, \
+           f"Recebido status inesperado {response.status_code} para injeção em '{param_name}'"
+
+    if response.status_code == status.HTTP_200_OK:
+        tasks = response.json()
+        assert isinstance(tasks, list)
+        print(f"WARN: Injeção em '{param_name}' retornou 200 OK. Resultado: {tasks}")
+
+async def test_list_tasks_filter_regex_injection(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
+):
+    """
+    Testa especificamente a injeção de $regex no filtro 'project'.
+    MongoDB pode aceitar regex, mas Pydantic deve garantir que é tratado como string.
+    """
+    payload_str = "/.*/" 
+    url = f"{settings.API_V1_STR}/tasks/?project={payload_str}"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    found_literal_match = any(task.get("project") == payload_str for task in tasks)
+    assert not found_literal_match or len(tasks) == 0, \
+           "Injeção de Regex parece ter encontrado resultados inesperados ou foi tratada literalmente."

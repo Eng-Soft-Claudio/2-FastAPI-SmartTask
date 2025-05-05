@@ -1,4 +1,5 @@
 # tests/test_auth.py
+import uuid
 import pytest
 from httpx import AsyncClient
 from fastapi import status
@@ -68,7 +69,7 @@ async def test_register_user_duplicate_username_case_insensitive(
 
 async def test_register_user_duplicate_username(
     test_async_client: AsyncClient,
-    test_user_a_token: str
+    test_user_a_token_and_id: tuple[str, uuid.UUID]
 ):
     """Testa registro com username duplicado."""
     attempt_data = {
@@ -85,11 +86,11 @@ async def test_register_user_duplicate_username(
 
 async def test_register_user_duplicate_email(
     test_async_client: AsyncClient,
-    test_user_a_token: str # Pede a fixture correta User A
+    test_user_a_token_and_id: tuple[str, uuid.UUID]
 ):
     """Testa registro com email duplicado."""
     attempt_data = {
-        "email": user_a_data["email"], # << Usa email do User A
+        "email": user_a_data["email"],
         "username": "anotherunique_username",
         "password": "anotherpassword",
     }
@@ -116,7 +117,11 @@ async def test_register_user_duplicate_email(
 )
 
 async def test_register_user_invalid_input(
-    test_async_client: AsyncClient, field: str, value: Any, error_type: str, error_msg_part: str
+    test_async_client: AsyncClient,
+    field: str,
+    value: Any,
+    error_type: str,
+    error_msg_part: str
 ):
     """Testa registro com dados inválidos específicos."""
     invalid_data = {
@@ -149,31 +154,37 @@ async def test_register_user_invalid_input(
 # ========================
 async def test_login_success(
     test_async_client: AsyncClient,
-    test_user_a_token: str # Pede a fixture correta User A (garante que existe)
+    test_user_a_token_and_id: tuple[str, uuid.UUID]
 ):
-     """Testa login bem-sucedido do Usuário A."""
-     login_data = {"username": user_a_data["username"], "password": user_a_data["password"]} # Usa dados do User A
-     url = f"{settings.API_V1_STR}/auth/login/access-token"
+    """Testa login bem-sucedido do Usuário A."""
+    login_data = {
+        "username": user_a_data["username"],
+        "password": user_a_data["password"]
+    } # Usa dados do User A
+    url = f"{settings.API_V1_STR}/auth/login/access-token"
 
-     response = await test_async_client.post(url, data=login_data) # Form data
+    response = await test_async_client.post(url, data=login_data) # Form data
 
-     assert response.status_code == status.HTTP_200_OK
-     token_data = response.json()
-     assert "access_token" in token_data
-     assert token_data["token_type"] == "bearer"
+    assert response.status_code == status.HTTP_200_OK
+    token_data = response.json()
+    assert "access_token" in token_data
+    assert token_data["token_type"] == "bearer"
 
 async def test_login_wrong_password(
     test_async_client: AsyncClient,
-    test_user_a_token: str # Pede a fixture correta User A (garante que existe)
+    test_user_a_token_and_id: tuple[str, uuid.UUID]
 ):
-     """Testa login com senha incorreta para o Usuário A."""
-     login_data = {"username": user_a_data["username"], "password": "wrongpassword"} # Usa user A, senha errada
-     url = f"{settings.API_V1_STR}/auth/login/access-token"
+    """Testa login com senha incorreta para o Usuário A."""
+    login_data = {
+        "username": user_a_data["username"],
+        "password": "wrongpassword"
+    } 
+    url = f"{settings.API_V1_STR}/auth/login/access-token"
 
-     response = await test_async_client.post(url, data=login_data)
+    response = await test_async_client.post(url, data=login_data)
 
-     assert response.status_code == status.HTTP_401_UNAUTHORIZED
-     assert "incorretos" in response.json()["detail"]
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "incorretos" in response.json()["detail"]
 
 async def test_login_user_not_found(
         test_async_client: AsyncClient

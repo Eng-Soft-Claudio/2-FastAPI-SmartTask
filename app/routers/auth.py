@@ -8,6 +8,7 @@ from app.db.mongodb_utils import get_database
 from app.db import user_crud 
 from app.models.user import User, UserCreate
 from app.models.token import Token
+from app.core.dependencies import CurrentUser 
 from app.core.security import verify_password, create_access_token
 
 router = APIRouter(
@@ -100,3 +101,18 @@ async def login_for_access_token(
         )
 
     return Token(access_token=access_token, token_type="bearer")
+
+@router.get(
+    "/users/me",
+    response_model=User,
+    summary="Obtém dados do usuário atual",
+    description="Recupera os dados do usuário atualmente autenticado com base no token.",
+    response_description="Dados do usuário autenticado.",
+)
+async def read_users_me(
+    current_user: CurrentUser 
+) -> User:
+    """
+    Retorna os dados do usuário associado ao token JWT válido fornecido.
+    """
+    return current_user

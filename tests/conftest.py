@@ -1,4 +1,5 @@
 # tests/conftest.py
+import uuid
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator, Generator, Dict, List 
@@ -18,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # --- Cliente de Teste (Escopo Function) ---
 @pytest_asyncio.fixture(scope="function")
+
 async def test_async_client() -> AsyncGenerator[AsyncClient, None]:
     db = None 
     try:
@@ -66,22 +68,41 @@ user_a_data = {
 }
 
 @pytest_asyncio.fixture(scope="function")
-async def test_user_a_token(test_async_client: AsyncClient) -> str:
+
+async def test_user_a_token_and_id(test_async_client: AsyncClient) -> tuple[str, uuid.UUID]: 
+    """Registra/loga User A e retorna (token, user_id)."""
     register_url = f"{settings.API_V1_STR}/auth/register"
     login_url = f"{settings.API_V1_STR}/auth/login/access-token"
+    users_me_url = f"{settings.API_V1_STR}/auth/users/me" 
+
+    # Registrar
     reg_response = await test_async_client.post(register_url, json=user_a_data)
     if reg_response.status_code not in [status.HTTP_201_CREATED, status.HTTP_409_CONFLICT]:
         pytest.fail(f"Falha inesperada ao registrar User A: {reg_response.text}")
 
+    # Logar para obter o token
     login_payload = {"username": user_a_data["username"], "password": user_a_data["password"]}
-    response = await test_async_client.post(login_url, data=login_payload)
-    if response.status_code != status.HTTP_200_OK:
-         pytest.fail(f"Falha ao fazer login com User A: {response.text}")
-    return response.json()["access_token"]
+    login_response = await test_async_client.post(login_url, data=login_payload)
+    if login_response.status_code != status.HTTP_200_OK:
+         pytest.fail(f"Falha ao fazer login com User A: {login_response.text}")
+    token = login_response.json()["access_token"]
+
+    # Obter o ID do usuário via /users/me
+    user_me_headers = {"Authorization": f"Bearer {token}"}
+    user_me_response = await test_async_client.get(users_me_url, headers=user_me_headers)
+    if user_me_response.status_code != status.HTTP_200_OK:
+        pytest.fail(f"Falha ao obter dados de User A via /users/me: {user_me_response.text}")
+    user_id_str = user_me_response.json()["id"]
+    user_id = uuid.UUID(user_id_str) # Converte para UUID
+
+    return token, user_id
 
 @pytest.fixture(scope="function")
-def auth_headers_a(test_user_a_token: str) -> Dict[str, str]:
-     return {"Authorization": f"Bearer {test_user_a_token}"}
+
+def auth_headers_a(test_user_a_token_and_id: tuple[str, uuid.UUID]) -> Dict[str, str]:
+     """Retorna headers de autenticação com o token de teste do User A."""
+     token, _ = test_user_a_token_and_id 
+     return {"Authorization": f"Bearer {token}"}
 
 # --- Fixtures para Usuário B ---
 user_b_data = {
