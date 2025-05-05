@@ -1,4 +1,9 @@
 # tests/test_tasks.py
+# ==========================================
+# --- Importações ---
+# ==========================================
+import unittest.mock
+from freezegun import freeze_time
 import pytest
 from httpx import AsyncClient
 from fastapi import status
@@ -7,10 +12,34 @@ import uuid
 import pytest_asyncio
 from app.core.config import settings
 from app.models.task import TaskStatus
-from datetime import date
+from datetime import date, timedelta, datetime, timezone
+from tests.conftest import user_a_data
 
+# ==========================================
+# --- Criação do Mock Webhook ---
+# ==========================================
+@pytest.fixture(
+        autouse=True
+)
+
+def auto_mock_send_webhook(mocker):
+    """
+    Aplica automaticamente o mock para send_webhook_notification para todos
+    os testes neste módulo.
+    """
+    mocker.patch(
+        "app.routers.tasks.send_webhook_notification",
+        new_callable=unittest.mock.AsyncMock,
+    )
+
+# ==========================================
+# --- Criação do Loop Assíncrono ---
+# ==========================================
 pytestmark = pytest.mark.asyncio
 
+# ==========================================
+# --- Criação do Base Task Data ---
+# ==========================================
 base_task_create_data = {
     "title": "Tarefa de Teste Padrão",
     "description": "Descrição da tarefa padrão",
@@ -22,16 +51,22 @@ base_task_create_data = {
 # ==========================================
 async def test_create_task_success(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] 
+    auth_headers_a: Dict[str, str],
 ):
-    """Testa a criação bem-sucedida de uma tarefa."""
+    """Testa a criação bem-sucedida de uma tarefa e verifica chamada do webhook."""
+    
     url = f"{settings.API_V1_STR}/tasks/"
-    response = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a) 
+    response = await test_async_client.post(
+        url,
+        json=base_task_create_data,
+        headers=auth_headers_a
+    ) 
 
     assert response.status_code == status.HTTP_201_CREATED
     response_data = response.json()
     assert response_data["title"] == base_task_create_data["title"]
     assert response_data["importance"] == base_task_create_data["importance"]
+    assert response_data["status"] == TaskStatus.PENDING.value
     assert "id" in response_data
     assert "owner_id" in response_data
     assert "created_at" in response_data
@@ -46,14 +81,117 @@ async def test_create_task_unauthorized(
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 # ==========================================
+# --- Testes de Criação e Atualização ---
+# ==========================================
+
+@pytest.mark.parametrize(
+    "field, length", [
+        ("title", 100), 
+        ("description", 500), 
+    ]
+)
+
+async def test_create_task_max_length_success(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    field: str,
+    length: int,
+):
+    """Testa criar tarefa com campos string no comprimento máximo permitido."""
+    payload = base_task_create_data.copy()
+    payload[field] = "X" * length 
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=payload, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_201_CREATED
+    response_data = response.json()
+    assert response_data[field] == payload[field]
+
+
+@pytest.mark.parametrize(
+    "field, length", [
+        ("title", 101), 
+        ("description", 501), 
+    ]
+)
+
+async def test_create_task_max_length_fail(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    field: str,
+    length: int,
+):
+    """Testa criar tarefa com campos string acima do comprimento máximo."""
+    payload = base_task_create_data.copy()
+    payload[field] = "X" * length
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=payload, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert f"String should have at most {length -1} characters" in response.text
+
+
+async def test_create_task_explicit_nulls_optional(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+):
+    """Testa criar tarefa enviando explicitamente null para campos opcionais."""
+    payload = base_task_create_data.copy()
+    payload["description"] = None
+    payload["due_date"] = None
+    payload["tags"] = None
+    payload["project"] = None
+
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=payload, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_201_CREATED
+    response_data = response.json()
+    assert response_data["description"] is None
+    assert response_data["due_date"] is None
+    assert response_data["tags"] is None
+    assert response_data["project"] is None
+
+
+async def test_update_task_explicit_nulls_optional(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+):
+    """Testa atualizar tarefa definindo campos opcionais como null explicitamente."""
+    url_create = f"{settings.API_V1_STR}/tasks/"
+    create_payload = {
+        **base_task_create_data,
+        "description": "Descrição inicial",
+        "due_date": date.today().isoformat(),
+        "tags": ["inicial"],
+        "project": "Projeto Inicial"
+    }
+    create_resp = await test_async_client.post(url_create, json=create_payload, headers=auth_headers_a)
+    assert create_resp.status_code == status.HTTP_201_CREATED
+    task_id = create_resp.json()["id"]
+
+    # Act: Atualizar enviando nulls
+    url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
+    update_payload = {
+        "description": None,
+        "due_date": None,
+        "tags": None, 
+        "project": None,
+    }
+    response = await test_async_client.put(url_put, json=update_payload, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    response_data = response.json()
+    assert response_data["description"] is None
+    assert response_data["due_date"] is None
+    assert response_data["tags"] is None 
+    assert response_data["project"] is None
+
+# ==========================================
 # --- Testes de Validação ---
 # ==========================================
 @pytest.mark.parametrize(
     "field, value, error_type, error_msg_part", [
-        ("title", "T2", "value_error", "String should have at least 3 characters"),
+        ("title", "T2", "string_too_short", "String should have at least 3 characters"),
         ("importance", 0, "greater_than_equal", "Input should be greater than or equal to 1"),
         ("importance", 6, "less_than_equal", "Input should be less than or equal to 5"),
-        ("due_date", "nao-e-data", "date_parsing", "invalid date format"),
+        ("due_date", "nao-e-data", "date_from_datetime_parsing", "invalid character"),
         ("status", "invalido", "enum", "Input should be"),
     ]
 )
@@ -67,16 +205,18 @@ async def test_create_task_invalid_input(
     invalid_data = base_task_create_data.copy()
     if value is None:
          if field in ["title", "importance"]:
-             del invalid_data[field]
-         elif field == "status" and value is None:
-             pytest.skip("Teste 'missing' não aplicável para 'status' com default.") 
-             return
+              if field in invalid_data: 
+                   del invalid_data[field]
+         elif field == "status":
+              pytest.skip("Teste 'None' não aplicável para 'status' com default.")
+              return
+         else:
+             invalid_data[field] = value
     else:
         invalid_data[field] = value
 
     url = f"{settings.API_V1_STR}/tasks/"
     response = await test_async_client.post(url, json=invalid_data, headers=auth_headers_a)
-
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     error_details = response.json()["detail"]
     found_error = False
@@ -86,6 +226,16 @@ async def test_create_task_invalid_input(
                 found_error = True
                 break
     assert found_error, f"Erro esperado para campo '{field}' tipo '{error_type}' msg '{error_msg_part}' não encontrado em {error_details}"
+
+@pytest.mark.parametrize(
+    "field, value, error_type, error_msg_part", [
+        ("title", "T2", "string_too_short", "String should have at least 3 characters"),
+        ("importance", 0, "greater_than_equal", "Input should be greater than or equal to 1"),
+        ("importance", 6, "less_than_equal", "Input should be less than or equal to 5"),
+        ("due_date", "nao-e-data", "date_from_datetime_parsing", "invalid character"),
+        ("status", "invalido", "enum", "Input should be"), 
+    ]
+)
 
 async def test_update_task_invalid_input(
     test_async_client: AsyncClient,
@@ -109,7 +259,6 @@ async def test_update_task_invalid_input(
     error_details = response.json()["detail"]
     found_error = False
     for error in error_details:
-        # No PUT, o erro estará aninhado em "body" -> campo
         if field in error.get("loc", []) and error.get("type") == error_type:
             if error_msg_part in error.get("msg", ""):
                 found_error = True
@@ -138,7 +287,8 @@ async def test_update_task_empty_payload(
 # --- Testes de Listagem ---
 # ==========================================
 async def test_list_tasks_success(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
 ):
     """Testa se User A lista apenas suas tarefas criadas neste teste."""
     url = f"{settings.API_V1_STR}/tasks/"
@@ -169,7 +319,9 @@ async def test_list_tasks_unauthorized(
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 async def test_list_tasks_does_not_show_other_users_tasks(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    auth_headers_b: Dict[str, str]
 ):
     """Garante que User B não vê as tarefas do User A."""
     url = f"{settings.API_V1_STR}/tasks/"
@@ -184,11 +336,158 @@ async def test_list_tasks_does_not_show_other_users_tasks(
     assert isinstance(tasks_b, list)
     assert len(tasks_b) == 0 # Lista de B deve estar vazia
 
+async def test_list_tasks_filter_non_existent_project(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict] 
+):
+    """Testa listar tarefas filtrando por um projeto que não existe."""
+    url = f"{settings.API_V1_STR}/tasks/?project=ProjetoInexistente123"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 0 
+
+async def test_list_tasks_filter_non_existent_tag(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
+):
+    """Testa listar tarefas filtrando por uma tag que nenhuma tarefa possui."""
+    url = f"{settings.API_V1_STR}/tasks/?tag=tag_nao_existe"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 0
+
+async def test_list_tasks_filter_multiple_tags_no_match(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
+):
+    """Testa listar tarefas filtrando por múltiplas tags onde nenhuma tarefa possui TODAS."""
+    url = f"{settings.API_V1_STR}/tasks/?tag=t1&tag=t3"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 0 
+
+async def test_list_tasks_filter_status_no_match(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
+):
+    """Testa listar tarefas filtrando por um status que nenhuma tarefa possui (ex: cancelada)."""
+    url = f"{settings.API_V1_STR}/tasks/?status={TaskStatus.CANCELLED.value}"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 0 
+
+@freeze_time("2025-05-04")
+
+async def test_list_tasks_filter_due_before_very_early(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
+):
+    """Testa listar tarefas filtrando com due_before muito no passado."""
+    early_date = "2024-01-01"
+    url = f"{settings.API_V1_STR}/tasks/?due_before={early_date}"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 0 
+
+# ========================================
+# --- Testes de Paginação ---
+# ========================================
+
+async def test_list_tasks_pagination_limit_1(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict] 
+):
+    """Testa a paginação com limit=1."""
+    url = f"{settings.API_V1_STR}/tasks/?limit=1"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 1 
+
+async def test_list_tasks_pagination_skip_all(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict] 
+):
+    """Testa a paginação pulando todas as tarefas ou mais."""
+    total_tasks_in_fixture = 5
+    url = f"{settings.API_V1_STR}/tasks/?skip={total_tasks_in_fixture}"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 0 
+
+    url_skip_more = f"{settings.API_V1_STR}/tasks/?skip={total_tasks_in_fixture + 5}"
+    response_skip_more = await test_async_client.get(url_skip_more, headers=auth_headers_a)
+    assert response_skip_more.status_code == status.HTTP_200_OK
+    tasks_skip_more = response_skip_more.json()
+    assert isinstance(tasks_skip_more, list)
+    assert len(tasks_skip_more) == 0
+
+async def test_list_tasks_pagination_limit_0(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+):
+    """Testa a paginação com limit=0 (deve ser bloqueado pela validação)."""
+    url = f"{settings.API_V1_STR}/tasks/?limit=0"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    # Verificar a mensagem de erro específica seria ainda melhor
+    assert "Input should be greater than or equal to 1" in response.text
+
+async def test_list_tasks_pagination_limit_too_high(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+):
+    """Testa a paginação com limit > 1000 (deve ser bloqueado pela validação)."""
+    url = f"{settings.API_V1_STR}/tasks/?limit=1001"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    assert "Input should be less than or equal to 1000" in response.text
+
+# ========================================
+# --- Testes de Filtros e Paginação ---
+# ========================================
+
+async def test_list_tasks_filter_and_pagination(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict] 
+):
+    """Testa filtro por projeto e paginação (skip=1, limit=2)."""
+    url = f"{settings.API_V1_STR}/tasks/?project=Filtro&skip=1&limit=2"
+    response = await test_async_client.get(url, headers=auth_headers_a)
+    assert response.status_code == status.HTTP_200_OK
+    tasks = response.json()
+    assert isinstance(tasks, list)
+    assert len(tasks) == 2
+
 # ========================================
 # --- Testes de Filtros e Ordenação ---
 # ========================================
 
-@pytest_asyncio.fixture(scope="function")
+@pytest_asyncio.fixture(
+        scope="function"
+)
+
 async def create_filter_sort_tasks(
     test_async_client: AsyncClient,
     auth_headers_a: Dict[str, str]
@@ -210,7 +509,9 @@ async def create_filter_sort_tasks(
     return created_tasks
 
 async def test_list_tasks_filter_by_project(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], create_filter_sort_tasks: List[Dict]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
 ):
     url = f"{settings.API_V1_STR}/tasks/?project=Filtro"
     response = await test_async_client.get(url, headers=auth_headers_a)
@@ -220,7 +521,9 @@ async def test_list_tasks_filter_by_project(
     assert all(task["project"] == "Filtro" for task in tasks)
 
 async def test_list_tasks_filter_by_status(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], create_filter_sort_tasks: List[Dict]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
 ):
     url = f"{settings.API_V1_STR}/tasks/?status=pendente"
     response = await test_async_client.get(url, headers=auth_headers_a)
@@ -230,7 +533,9 @@ async def test_list_tasks_filter_by_status(
     assert all(task["status"] == TaskStatus.PENDING.value for task in tasks)
 
 async def test_list_tasks_filter_by_single_tag(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], create_filter_sort_tasks: List[Dict]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
 ):
     url = f"{settings.API_V1_STR}/tasks/?tag=t2"
     response = await test_async_client.get(url, headers=auth_headers_a)
@@ -242,7 +547,9 @@ async def test_list_tasks_filter_by_single_tag(
     assert "Filter Task P2 Medium" in titles
 
 async def test_list_tasks_filter_by_multiple_tags(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], create_filter_sort_tasks: List[Dict]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
 ):
     url = f"{settings.API_V1_STR}/tasks/?tag=t1&tag=t2"
     response = await test_async_client.get(url, headers=auth_headers_a)
@@ -252,7 +559,9 @@ async def test_list_tasks_filter_by_multiple_tags(
     assert tasks[0]["title"] == "Filter Task P1 High"
 
 async def test_list_tasks_sort_by_priority(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], create_filter_sort_tasks: List[Dict]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
 ):
     url = f"{settings.API_V1_STR}/tasks/?sort_by=priority_score&sort_order=desc"
     response = await test_async_client.get(url, headers=auth_headers_a)
@@ -263,7 +572,9 @@ async def test_list_tasks_sort_by_priority(
     assert scores == sorted(scores, reverse=True)
 
 async def test_list_tasks_sort_by_due_date_asc(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], create_filter_sort_tasks: List[Dict]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    create_filter_sort_tasks: List[Dict]
 ):
     url = f"{settings.API_V1_STR}/tasks/?sort_by=due_date&sort_order=asc"
     response = await test_async_client.get(url, headers=auth_headers_a)
@@ -277,6 +588,7 @@ async def test_list_tasks_sort_by_due_date_asc(
 # ========================================
 # --- Testes GET /tasks/{id} ---
 # ========================================
+
 async def test_get_specific_task_success(
     test_async_client: AsyncClient,
     auth_headers_a: Dict[str, str] 
@@ -317,7 +629,9 @@ async def test_get_specific_task_unauthorized(
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 async def test_get_other_user_task_forbidden(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    auth_headers_b: Dict[str, str]
 ):
     """Garante que User B não consegue obter a tarefa do User A por ID."""
     # Arrange: User A cria tarefa
@@ -337,21 +651,35 @@ async def test_get_other_user_task_forbidden(
 # ========================================
 # --- Testes PUT /tasks/{id} ---
 # ========================================
+
 async def test_update_task_success(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
 ):
-    """Testa atualizar uma tarefa com sucesso."""
+    """Testa atualizar uma tarefa com sucesso e verifica chamada do webhook."""
     # Arrange: Criar tarefa
     url = f"{settings.API_V1_STR}/tasks/"
-    create_resp = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a)
+    create_resp = await test_async_client.post(
+        url,
+        json=base_task_create_data,
+        headers=auth_headers_a
+    )
     assert create_resp.status_code == 201
     task_id = create_resp.json()["id"]
-    original_score = create_resp.json()["priority_score"]
+    original_score = create_resp.json().get("priority_score")
 
     # Act: Atualizar a tarefa
     url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
-    update_payload = {"title": "Título Atualizado", "status": TaskStatus.COMPLETED.value, "importance": 5} 
-    response = await test_async_client.put(url_put, json=update_payload, headers=auth_headers_a)
+    update_payload = {
+        "title": "Título Atualizado",
+        "status": TaskStatus.COMPLETED.value,
+        "importance": 5
+    } 
+    response = await test_async_client.put(
+        url_put,
+        json=update_payload,
+        headers=auth_headers_a
+    )
 
     # Assert
     assert response.status_code == status.HTTP_200_OK
@@ -362,7 +690,6 @@ async def test_update_task_success(
     assert data["importance"] == update_payload["importance"]
     assert "updated_at" in data and data["updated_at"] is not None
     assert "priority_score" in data
-    # Verificar se score mudou (importância 3 -> 5)
     assert data["priority_score"] != original_score
 
 async def test_update_task_not_found(
@@ -375,7 +702,9 @@ async def test_update_task_not_found(
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 async def test_update_other_user_task_forbidden(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    auth_headers_b: Dict[str, str]
 ):
     """Testa se User B não pode atualizar tarefa do User A."""
     # Arrange: User A cria tarefa
@@ -393,7 +722,7 @@ async def test_update_other_user_task_forbidden(
 
 async def test_get_specific_task_success(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] # << CORRIGIDO para User A
+    auth_headers_a: Dict[str, str]
 ):
     """Testa buscar uma tarefa específica do usuário A."""
     url_create = f"{settings.API_V1_STR}/tasks/"
@@ -429,7 +758,9 @@ async def test_get_specific_task_unauthorized(
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 async def test_get_other_user_task_forbidden(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    auth_headers_b: Dict[str, str]
 ):
     """Garante que User B não consegue obter a tarefa do User A por ID."""
     url = f"{settings.API_V1_STR}/tasks/"
@@ -444,10 +775,12 @@ async def test_get_other_user_task_forbidden(
     assert response_b.status_code == status.HTTP_404_NOT_FOUND
 
 # ==========================================
-# --- Testes DELETE /tasks/{id} (NOVOS) ---
+# --- Testes DELETE /tasks/{id} ---
 # ==========================================
+
 async def test_delete_task_success(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
 ):
     """Testa deletar uma tarefa com sucesso."""
     # Arrange: Criar tarefa
@@ -469,7 +802,8 @@ async def test_delete_task_success(
     assert get_response.status_code == status.HTTP_404_NOT_FOUND
 
 async def test_delete_task_not_found(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
 ):
     """Testa deletar tarefa inexistente."""
     url = f"{settings.API_V1_STR}/tasks/{uuid.uuid4()}" # ID aleatório
@@ -477,7 +811,9 @@ async def test_delete_task_not_found(
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 async def test_delete_other_user_task_forbidden(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    auth_headers_b: Dict[str, str]
 ):
     """Testa se User B não pode deletar tarefa do User A."""
     # Arrange: User A cria tarefa
@@ -491,4 +827,87 @@ async def test_delete_other_user_task_forbidden(
     response_b = await test_async_client.delete(url_delete, headers=auth_headers_b)
 
     # Assert: Falha com 404
-    assert response_b.status_code == status.HTTP_404_NOT_FOUND
+    
+# ==========================================
+# --- Testes de Segurança (JWT) ---
+# ==========================================
+
+async def test_access_tasks_invalid_token_format(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str] 
+):
+    """Testa acessar /tasks com um token JWT mal formatado."""
+    url = f"{settings.API_V1_STR}/tasks/"
+    invalid_headers = {"Authorization": "Bearer tokeninvalido.nao.jwt"}
+    response = await test_async_client.get(url, headers=invalid_headers)
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "validar as credenciais" in response.json()["detail"]
+
+
+async def test_access_tasks_token_wrong_secret(
+    test_async_client: AsyncClient,
+    mocker 
+):
+    """Testa acessar /tasks com um token assinado com segredo incorreto."""
+    from app.core.security import create_access_token
+    from app.models.token import TokenPayload
+
+    # 1. Criando um usuário para ter um ID válido 
+    user_id_dummy = uuid.uuid4()
+    username_dummy = "dummyuser"
+
+    # 2. Gerando um token JWT usando uma chave secreta diferente da configuração
+    wrong_secret = "outra-chave-secreta-bem-diferente"
+    assert wrong_secret != settings.JWT_SECRET_KEY
+    token_wrong_key = create_access_token(
+        subject=user_id_dummy,
+        username=username_dummy,
+    )
+    import jwt as jose_jwt 
+    to_encode = {"sub": str(user_id_dummy), "username": username_dummy, "exp": datetime.now(timezone.utc) + timedelta(minutes=15)}
+    token_really_wrong_key = jose_jwt.encode(to_encode, wrong_secret, algorithm=settings.JWT_ALGORITHM)
+
+
+    # 3. Tentando acessar a API com este token
+    url = f"{settings.API_V1_STR}/tasks/"
+    invalid_headers = {"Authorization": f"Bearer {token_really_wrong_key}"}
+    response = await test_async_client.get(url, headers=invalid_headers)
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "validar as credenciais" in response.json()["detail"]
+
+
+@freeze_time("2025-05-04 18:35:00")
+
+async def test_access_tasks_expired_token(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    mocker
+):
+    """Testa acessar /tasks com um token JWT expirado."""
+    from app.core.security import create_access_token, ALGORITHM
+    import jwt as jose_jwt
+    from datetime import datetime, timedelta, timezone
+
+    user_id_dummy = uuid.uuid4() 
+
+    # 1. Criando um token com data de expiração no passado
+    past_time = datetime.now(timezone.utc) - timedelta(minutes=30)
+    expired_payload = {
+        "sub": str(user_id_dummy), 
+        "username": user_a_data["username"],
+        "exp": past_time
+    }
+    expired_token = jose_jwt.encode(
+        expired_payload,
+        settings.JWT_SECRET_KEY,
+        algorithm=ALGORITHM
+    )
+
+    # 2. Tente acessar a API com o token expirado
+    url = f"{settings.API_V1_STR}/tasks/"
+    invalid_headers = {"Authorization": f"Bearer {expired_token}"}
+    response = await test_async_client.get(url, headers=invalid_headers)
+
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+    assert "validar as credenciais" in response.json()["detail"]

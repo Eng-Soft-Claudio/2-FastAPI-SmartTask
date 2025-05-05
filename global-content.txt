@@ -1799,12 +1799,13 @@ def auth_headers(test_user_token: str) -> Dict[str, str]:
      """Retorna headers de autenticação com o token de teste."""
      return {"Authorization": f"Bearer {test_user_token}"}--- Fim de tests/__init__.py ---
 
---- Início de tests/conftest.py (111 linhas) ---
+--- Início de tests/conftest.py (129 linhas) ---
 # tests/conftest.py
 import pytest
 import pytest_asyncio
 from typing import AsyncGenerator, Generator, Dict, List 
 import asyncio
+import logging
 from httpx import AsyncClient, ASGITransport
 from fastapi import status #
 from app.main import app as fastapi_app
@@ -1815,27 +1816,48 @@ from app.db.user_crud import USERS_COLLECTION
 from app.db.task_crud import TASKS_COLLECTION
 from app.models.task import TaskStatus 
 
+logger = logging.getLogger(__name__)
+
 # --- Cliente de Teste (Escopo Function) ---
 @pytest_asyncio.fixture(scope="function")
 async def test_async_client() -> AsyncGenerator[AsyncClient, None]:
-    await connect_to_mongo()
-    db = get_database()
-
-    await db[USERS_COLLECTION].delete_many({})
-    await db[TASKS_COLLECTION].delete_many({})
-
-    transport = ASGITransport(app=fastapi_app)
-    async with AsyncClient(transport=transport, base_url="http://testserver") as client:
-        yield client
-
-    # print("Limpando coleções APÓS o teste.") # Removido log repetitivo
+    db = None 
     try:
-         db_after = get_database()
-         if db_after:
-            await db_after[USERS_COLLECTION].delete_many({})
-            await db_after[TASKS_COLLECTION].delete_many({})
-    except Exception as e:
-        print(f"Erro ao limpar DB após teste: {e}")
+        # -- Conexão e Limpeza Antes do Teste --
+        await connect_to_mongo()
+        db = get_database() 
+
+        # --- Verificar db antes de usar ---
+        if db is not None:
+             if "test" not in settings.DATABASE_NAME.lower():
+                  logger.warning(f"Rodando testes no banco '{settings.DATABASE_NAME}'. Coleções serão limpas!")
+
+             logger.debug("Limpando coleções ANTES do teste...")
+             await db[USERS_COLLECTION].delete_many({})
+             await db[TASKS_COLLECTION].delete_many({})
+             logger.debug("Coleções limpas ANTES do teste.")
+        else:
+            pytest.fail("Falha ao conectar ao MongoDB na fixture test_async_client (setup).")
+
+
+        # -- Cria e fornece o cliente --
+        transport = ASGITransport(app=fastapi_app)
+        async with AsyncClient(transport=transport, base_url="http://testserver") as client:
+            yield client 
+
+    finally:
+        # --- Código de limpeza no finally ---
+        logger.debug("Executando limpeza pós-teste...")
+        if db is not None: # Usa a variável 'db' do escopo da fixture
+             try:
+                 await db[USERS_COLLECTION].delete_many({})
+                 await db[TASKS_COLLECTION].delete_many({})
+                 logger.debug("Coleções limpas APÓS o teste.")
+             except Exception as e:
+                 # Loga o erro específico da limpeza, mas não falha o teste principal
+                 logger.error(f"Erro ao limpar DB após teste: {e}", exc_info=True)
+        else:
+            logger.warning("Limpeza pós-teste pulada: Conexão com DB não estava estabelecida.")
 
 # --- Fixtures para Usuário A ---
 user_a_data = {
@@ -1850,13 +1872,11 @@ async def test_user_a_token(test_async_client: AsyncClient) -> str:
     register_url = f"{settings.API_V1_STR}/auth/register"
     login_url = f"{settings.API_V1_STR}/auth/login/access-token"
     reg_response = await test_async_client.post(register_url, json=user_a_data)
-    # --- Usando status importado ---
     if reg_response.status_code not in [status.HTTP_201_CREATED, status.HTTP_409_CONFLICT]:
         pytest.fail(f"Falha inesperada ao registrar User A: {reg_response.text}")
 
     login_payload = {"username": user_a_data["username"], "password": user_a_data["password"]}
     response = await test_async_client.post(login_url, data=login_payload)
-    # --- Usando status importado ---
     if response.status_code != status.HTTP_200_OK:
          pytest.fail(f"Falha ao fazer login com User A: {response.text}")
     return response.json()["access_token"]
@@ -1878,13 +1898,11 @@ async def test_user_b_token(test_async_client: AsyncClient) -> str:
     register_url = f"{settings.API_V1_STR}/auth/register"
     login_url = f"{settings.API_V1_STR}/auth/login/access-token"
     reg_response = await test_async_client.post(register_url, json=user_b_data)
-    # --- Usando status importado ---
     if reg_response.status_code not in [status.HTTP_201_CREATED, status.HTTP_409_CONFLICT]:
          pytest.fail(f"Falha inesperada ao registrar User B: {reg_response.text}")
 
     login_payload = {"username": user_b_data["username"], "password": user_b_data["password"]}
     response = await test_async_client.post(login_url, data=login_payload)
-     # --- Usando status importado ---
     if response.status_code != status.HTTP_200_OK:
          pytest.fail(f"Falha ao fazer login com User B: {response.text}")
     return response.json()["access_token"]
@@ -1912,17 +1930,16 @@ async def create_filter_sort_tasks(test_async_client: AsyncClient, auth_headers_
         created_tasks.append(response.json())
     return created_tasks--- Fim de tests/conftest.py ---
 
---- Início de tests/test_auth.py (109 linhas) ---
+--- Início de tests/test_auth.py (154 linhas) ---
 # tests/test_auth.py
 import pytest
 from httpx import AsyncClient
 from fastapi import status
-
-from app.core.config import settings # Para construir URLs
-# --- IMPORTAR DADOS DE USUÁRIO DO CONFTEST ---
+from typing import Dict, Any
+from app.core.config import settings 
 from tests.conftest import user_a_data
 
-# Marca todos os testes neste módulo para usar asyncio
+
 pytestmark = pytest.mark.asyncio
 
 # ==============================
@@ -1983,6 +2000,50 @@ async def test_register_user_duplicate_email(
     assert response.status_code == status.HTTP_409_CONFLICT
     assert "já registrado" in response.json()["detail"]
 
+# ==============================
+# --- Testes de Validação ---
+# ==============================
+@pytest.mark.parametrize(
+        "field, value, error_type, error_msg_part", [
+            ("email", "não-é-um-email", "value_error", "valid email address"),
+            ("username", "us", "value_error", "String should have at least 3 characters"),
+            ("username", "user name com espaco", "value_error", "string matching regex"),
+            ("password", "curta", "value_error", "String should have at least 8 characters"), 
+            ("email", None, "missing", "Field required"), 
+            ("username", None, "missing", "Field required"),
+            ("password", None, "missing", "Field required"),
+        ]
+)
+
+async def test_register_user_invalid_input(
+    test_async_client: AsyncClient, field: str, value: Any, error_type: str, error_msg_part: str
+):
+    """Testa registro com dados inválidos específicos."""
+    invalid_data = {
+        "email": "valid@example.com",
+        "username": "validusername",
+        "password": "validpassword",
+        "full_name": "Valid Name"
+    }
+    if value is None:
+        if field in invalid_data:
+           del invalid_data[field]
+    else:
+        invalid_data[field] = value
+
+    url = f"{settings.API_V1_STR}/auth/register"
+    response = await test_async_client.post(url, json=invalid_data)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_details = response.json()["detail"]
+    found_error = False
+    for error in error_details:
+        if field in error.get("loc", []) and error.get("type") == error_type:
+             if error_msg_part in error.get("msg", ""):
+                  found_error = True
+                  break
+    assert found_error, f"Erro esperado para campo '{field}' com tipo '{error_type}' e msg contendo '{error_msg_part}' não encontrado em {error_details}"
+
 # ========================
 # --- Testes de Login ---
 # ========================
@@ -2014,32 +2075,28 @@ async def test_login_wrong_password(
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
      assert "incorretos" in response.json()["detail"]
 
-async def test_login_user_not_found(test_async_client: AsyncClient):
-     """Testa login com usuário inexistente."""
-     login_data = {"username": "nonexistentuser", "password": "password"}
-     url = f"{settings.API_V1_STR}/auth/login/access-token"
+async def test_login_user_not_found(
+        test_async_client: AsyncClient
+):
+    """Testa login com usuário inexistente."""
+    login_data = {"username": "nonexistentuser", "password": "password"}
+    url = f"{settings.API_V1_STR}/auth/login/access-token"
 
-     response = await test_async_client.post(url, data=login_data)
+    response = await test_async_client.post(url, data=login_data)
 
-     assert response.status_code == status.HTTP_401_UNAUTHORIZED # Mesmo erro para user/pwd errados--- Fim de tests/test_auth.py ---
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED --- Fim de tests/test_auth.py ---
 
---- Início de tests/test_tasks.py (405 linhas) ---
+--- Início de tests/test_tasks.py (494 linhas) ---
 # tests/test_tasks.py
 import pytest
 from httpx import AsyncClient
 from fastapi import status
 from typing import Dict, List, Any
 import uuid
-
 import pytest_asyncio
-
-# Removido import desnecessário de pytest_asyncio
-# import pytest_asyncio
-
 from app.core.config import settings
 from app.models.task import TaskStatus
-# Importar fixtures A e B agora são usadas
-# from tests.conftest import auth_headers_a, auth_headers_b
+from datetime import date
 
 pytestmark = pytest.mark.asyncio
 
@@ -2052,14 +2109,13 @@ base_task_create_data = {
 # ==========================================
 # --- Testes de Criação ---
 # ==========================================
-# Pede a fixture correta: auth_headers_a
 async def test_create_task_success(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] # << CORRIGIDO para User A
+    auth_headers_a: Dict[str, str] 
 ):
     """Testa a criação bem-sucedida de uma tarefa."""
     url = f"{settings.API_V1_STR}/tasks/"
-    response = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a) # << CORRIGIDO
+    response = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a) 
 
     assert response.status_code == status.HTTP_201_CREATED
     response_data = response.json()
@@ -2070,15 +2126,106 @@ async def test_create_task_success(
     assert "created_at" in response_data
     assert "priority_score" in response_data
 
-async def test_create_task_unauthorized(test_async_client: AsyncClient):
+async def test_create_task_unauthorized(
+        test_async_client: AsyncClient
+):
      """Testa criar tarefa sem autenticação."""
      url = f"{settings.API_V1_STR}/tasks/"
-     response = await test_async_client.post(url, json=base_task_create_data) # Não envia headers
+     response = await test_async_client.post(url, json=base_task_create_data) 
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-# ========================================
+# ==========================================
+# --- Testes de Validação ---
+# ==========================================
+@pytest.mark.parametrize(
+    "field, value, error_type, error_msg_part", [
+        ("title", "T2", "value_error", "String should have at least 3 characters"),
+        ("importance", 0, "greater_than_equal", "Input should be greater than or equal to 1"),
+        ("importance", 6, "less_than_equal", "Input should be less than or equal to 5"),
+        ("due_date", "nao-e-data", "date_parsing", "invalid date format"),
+        ("status", "invalido", "enum", "Input should be"),
+    ]
+)
+
+async def test_create_task_invalid_input(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    field: str, value: Any, error_type: str, error_msg_part: str
+):
+    """Testa criar tarefa com dados inválidos."""
+    invalid_data = base_task_create_data.copy()
+    if value is None:
+         if field in ["title", "importance"]:
+             del invalid_data[field]
+         elif field == "status" and value is None:
+             pytest.skip("Teste 'missing' não aplicável para 'status' com default.") 
+             return
+    else:
+        invalid_data[field] = value
+
+    url = f"{settings.API_V1_STR}/tasks/"
+    response = await test_async_client.post(url, json=invalid_data, headers=auth_headers_a)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_details = response.json()["detail"]
+    found_error = False
+    for error in error_details:
+        if field in error.get("loc", []) and error.get("type") == error_type:
+            if error_msg_part in error.get("msg", ""):
+                found_error = True
+                break
+    assert found_error, f"Erro esperado para campo '{field}' tipo '{error_type}' msg '{error_msg_part}' não encontrado em {error_details}"
+
+async def test_update_task_invalid_input(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str],
+    field: str, value: Any, error_type: str, error_msg_part: str
+):
+    """Testa atualizar tarefa com dados inválidos."""
+    # Arrange: Criar uma tarefa primeiro
+    url = f"{settings.API_V1_STR}/tasks/"
+    create_resp = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a)
+    assert create_resp.status_code == 201
+    task_id = create_resp.json()["id"]
+
+    # Act: Tentar atualizar com dado inválido
+    invalid_update_payload = {field: value}
+    url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
+    response = await test_async_client.put(url_put, json=invalid_update_payload, headers=auth_headers_a)
+
+    # Assert
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
+    error_details = response.json()["detail"]
+    found_error = False
+    for error in error_details:
+        # No PUT, o erro estará aninhado em "body" -> campo
+        if field in error.get("loc", []) and error.get("type") == error_type:
+            if error_msg_part in error.get("msg", ""):
+                found_error = True
+                break
+    assert found_error, f"Erro esperado para campo '{field}' com tipo '{error_type}' e msg contendo '{error_msg_part}' não encontrado em {error_details}"
+
+async def test_update_task_empty_payload(
+     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+):
+    """Testa atualizar tarefa com payload vazio (deve retornar 400)."""
+    # Arrange: Criar tarefa
+    url = f"{settings.API_V1_STR}/tasks/"
+    create_resp = await test_async_client.post(url, json=base_task_create_data, headers=auth_headers_a)
+    assert create_resp.status_code == 201
+    task_id = create_resp.json()["id"]
+
+    # Act: Tentar atualizar com payload vazio
+    url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
+    response = await test_async_client.put(url_put, json={}, headers=auth_headers_a) # Payload vazio
+
+    # Assert: Esperamos 400 (conforme nossa lógica em update_task)
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
+    assert "Nenhum campo válido fornecido" in response.json()["detail"]
+
+# ==========================================
 # --- Testes de Listagem ---
-# ========================================
+# ==========================================
 async def test_list_tasks_success(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
 ):
@@ -2102,7 +2249,9 @@ async def test_list_tasks_success(
     assert task1["title"] in titles
     assert task2["title"] in titles
 
-async def test_list_tasks_unauthorized(test_async_client: AsyncClient):
+async def test_list_tasks_unauthorized(
+        test_async_client: AsyncClient
+):
      """Testa listar tarefas sem autenticação."""
      url = f"{settings.API_V1_STR}/tasks/"
      response = await test_async_client.get(url)
@@ -2128,9 +2277,11 @@ async def test_list_tasks_does_not_show_other_users_tasks(
 # --- Testes de Filtros e Ordenação ---
 # ========================================
 
-# Criar uma fixture de dados para facilitar testes de filtro/sort
 @pytest_asyncio.fixture(scope="function")
-async def create_filter_sort_tasks(test_async_client: AsyncClient, auth_headers_a: Dict[str, str]) -> List[Dict]:
+async def create_filter_sort_tasks(
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
+) -> List[Dict]:
     """Cria um conjunto de tarefas com variações para testes."""
     url = f"{settings.API_V1_STR}/tasks/"
     tasks_to_create = [
@@ -2215,9 +2366,6 @@ async def test_list_tasks_sort_by_due_date_asc(
 # ========================================
 # --- Testes GET /tasks/{id} ---
 # ========================================
-###################################################
-# test_get_specific_task_unauthorized <<<<<FALTANDO
-###################################################
 async def test_get_specific_task_success(
     test_async_client: AsyncClient,
     auth_headers_a: Dict[str, str] 
@@ -2238,8 +2386,6 @@ async def test_get_specific_task_success(
     assert response_data["id"] == task_id
     assert response_data["title"] == base_task_create_data["title"] 
 
-
-# Usa a fixture correta: auth_headers_a
 async def test_get_specific_task_not_found(
     test_async_client: AsyncClient,
     auth_headers_a: Dict[str, str] 
@@ -2249,6 +2395,15 @@ async def test_get_specific_task_not_found(
     url = f"{settings.API_V1_STR}/tasks/{non_existent_id}"
     response = await test_async_client.get(url, headers=auth_headers_a)
     assert response.status_code == status.HTTP_404_NOT_FOUND
+
+async def test_get_specific_task_unauthorized(
+        test_async_client: AsyncClient
+):
+    """Testa buscar tarefa específica sem autenticação."""
+    some_id = uuid.uuid4()
+    url = f"{settings.API_V1_STR}/tasks/{some_id}"
+    response = await test_async_client.get(url) 
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
 async def test_get_other_user_task_forbidden(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
@@ -2269,7 +2424,7 @@ async def test_get_other_user_task_forbidden(
     assert response_b.status_code == status.HTTP_404_NOT_FOUND
 
 # ========================================
-# --- Testes PUT /tasks/{id} (NOVOS) ---
+# --- Testes PUT /tasks/{id} ---
 # ========================================
 async def test_update_task_success(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
@@ -2300,7 +2455,8 @@ async def test_update_task_success(
     assert data["priority_score"] != original_score
 
 async def test_update_task_not_found(
-    test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
+    test_async_client: AsyncClient,
+    auth_headers_a: Dict[str, str]
 ):
     """Testa atualizar tarefa inexistente."""
     url = f"{settings.API_V1_STR}/tasks/{uuid.uuid4()}" 
@@ -2342,27 +2498,25 @@ async def test_get_specific_task_success(
     assert response_data["id"] == task_id
     assert response_data["title"] == base_task_create_data["title"]
 
-
-# Pede a fixture correta: auth_headers_a
 async def test_get_specific_task_not_found(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] # << CORRIGIDO para User A
+    auth_headers_a: Dict[str, str] 
 ):
     """Testa buscar uma tarefa com ID inexistente."""
     non_existent_id = uuid.uuid4()
     url = f"{settings.API_V1_STR}/tasks/{non_existent_id}"
-    response = await test_async_client.get(url, headers=auth_headers_a) # << CORRIGIDO
+    response = await test_async_client.get(url, headers=auth_headers_a) 
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
-# Nenhuma mudança necessária
-async def test_get_specific_task_unauthorized(test_async_client: AsyncClient):
+async def test_get_specific_task_unauthorized(
+        test_async_client: AsyncClient
+):
      """Testa buscar tarefa sem autenticação."""
      some_valid_id_placeholder = uuid.uuid4()
      url = f"{settings.API_V1_STR}/tasks/{some_valid_id_placeholder}"
      response = await test_async_client.get(url)
      assert response.status_code == status.HTTP_401_UNAUTHORIZED
 
-# Nenhuma mudança necessária
 async def test_get_other_user_task_forbidden(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]
 ):
@@ -2376,7 +2530,7 @@ async def test_get_other_user_task_forbidden(
     url_get = f"{settings.API_V1_STR}/tasks/{task_a_id}"
     response_b = await test_async_client.get(url_get, headers=auth_headers_b)
 
-    assert response_b.status_code == status.HTTP_404_NOT_FOUN
+    assert response_b.status_code == status.HTTP_404_NOT_FOUND
 
 # ==========================================
 # --- Testes DELETE /tasks/{id} (NOVOS) ---
@@ -2403,7 +2557,6 @@ async def test_delete_task_success(
     get_response = await test_async_client.get(url_get, headers=auth_headers_a)
     assert get_response.status_code == status.HTTP_404_NOT_FOUND
 
-
 async def test_delete_task_not_found(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str]
 ):
@@ -2411,7 +2564,6 @@ async def test_delete_task_not_found(
     url = f"{settings.API_V1_STR}/tasks/{uuid.uuid4()}" # ID aleatório
     response = await test_async_client.delete(url, headers=auth_headers_a)
     assert response.status_code == status.HTTP_404_NOT_FOUND
-
 
 async def test_delete_other_user_task_forbidden(
     test_async_client: AsyncClient, auth_headers_a: Dict[str, str], auth_headers_b: Dict[str, str]

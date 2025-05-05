@@ -2,7 +2,7 @@
 import pytest
 from httpx import AsyncClient
 from fastapi import status
-from typing import Dict, Any
+from typing import Any
 from app.core.config import settings 
 from tests.conftest import user_a_data
 
@@ -12,7 +12,9 @@ pytestmark = pytest.mark.asyncio
 # ==============================
 # --- Testes de Registro ---
 # ==============================
-async def test_register_user_success(test_async_client: AsyncClient):
+async def test_register_user_success(
+        test_async_client: AsyncClient
+):
     """Testa registro de usuário bem-sucedido."""
     # Usa dados únicos para este teste específico
     new_user_data = {
@@ -32,6 +34,37 @@ async def test_register_user_success(test_async_client: AsyncClient):
     assert response_data["full_name"] == new_user_data["full_name"]
     assert "id" in response_data
     assert "hashed_password" not in response_data 
+
+async def test_register_user_duplicate_username_case_insensitive(
+    test_async_client: AsyncClient,
+):
+    """
+    Testa o registro com um username que difere apenas em maiúsculas/minúsculas
+    de um username existente. Como o desejado é ser case-sensitive, espera-se sucesso (201).
+    """
+    # 1. Registrar usuário inicial
+    user_initial_data = {
+        "email": "case@example.com",
+        "username": "CaseTestUser", 
+        "password": "password123",
+    }
+    url = f"{settings.API_V1_STR}/auth/register"
+    response_initial = await test_async_client.post(url, json=user_initial_data)
+    assert response_initial.status_code == status.HTTP_201_CREATED, \
+        f"Falha ao registrar usuário inicial para teste case-insensitive: {response_initial.text}"
+
+    # 2. Tentar registrar com o mesmo username, mas minúsculo
+    user_duplicate_case_data = {
+        "email": "case_different@example.com", 
+        "username": "casetestuser",
+        "password": "password123",
+    }
+    response_duplicate = await test_async_client.post(url, json=user_duplicate_case_data)
+
+    # Assert: Verifica se o registro foi permitido (201), confirmando case-sensitivity.
+    assert response_duplicate.status_code == status.HTTP_201_CREATED, \
+        f"O registro deveria ter sido permitido (201), mas falhou com status {response_duplicate.status_code}. " \
+        "Verificar se a lógica de validação de username inesperadamente se tornou case-insensitive."
 
 async def test_register_user_duplicate_username(
     test_async_client: AsyncClient,
@@ -73,10 +106,10 @@ async def test_register_user_duplicate_email(
 @pytest.mark.parametrize(
         "field, value, error_type, error_msg_part", [
             ("email", "não-é-um-email", "value_error", "valid email address"),
-            ("username", "us", "value_error", "String should have at least 3 characters"),
-            ("username", "user name com espaco", "value_error", "string matching regex"),
-            ("password", "curta", "value_error", "String should have at least 8 characters"), 
-            ("email", None, "missing", "Field required"), 
+            ("username", "us", "string_too_short", "String should have at least 3 characters"),
+            ("username", "user name com espaco", "string_pattern_mismatch", "match pattern"),
+            ("password", "curta", "string_too_short", "String should have at least 8 characters"),
+            ("email", None, "missing", "Field required"),
             ("username", None, "missing", "Field required"),
             ("password", None, "missing", "Field required"),
         ]
