@@ -11,6 +11,7 @@ from fastapi import status
 from typing import Dict, List, Any
 import uuid
 import pytest_asyncio
+from pytest_mock import mocker
 from app.core.config import settings
 from app.models.task import TaskStatus
 from datetime import date, timedelta, datetime, timezone
@@ -835,15 +836,20 @@ async def test_delete_other_user_task_forbidden(
 
 async def test_access_tasks_invalid_token_format(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] 
+    auth_headers_a: Dict[str, str],
+    mocker
 ):
     """Testa acessar /tasks com um token JWT mal formatado."""
     url = f"{settings.API_V1_STR}/tasks/"
     invalid_headers = {"Authorization": "Bearer tokeninvalido.nao.jwt"}
+
+    mock_sec_logger = mocker.patch("app.core.security.logger")
+
     response = await test_async_client.get(url, headers=invalid_headers)
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
-
+    mock_sec_logger.error.assert_called_once()
+    assert "Not enough segments" in mock_sec_logger.error.call_args[0][0]
 
 async def test_access_tasks_token_wrong_secret(
     test_async_client: AsyncClient,
@@ -865,9 +871,13 @@ async def test_access_tasks_token_wrong_secret(
         username=username_dummy,
     )
     import jwt as jose_jwt 
-    to_encode = {"sub": str(user_id_dummy), "username": username_dummy, "exp": datetime.now(timezone.utc) + timedelta(minutes=15)}
+    to_encode = {"sub": str(user_id_dummy),
+                "username": username_dummy,
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=15)
+                }
     token_really_wrong_key = jose_jwt.encode(to_encode, wrong_secret, algorithm=settings.JWT_ALGORITHM)
 
+    mock_sec_logger = mocker.patch("app.core.security.logger")
 
     # 3. Tentando acessar a API com este token
     url = f"{settings.API_V1_STR}/tasks/"
@@ -876,6 +886,8 @@ async def test_access_tasks_token_wrong_secret(
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
+    mock_sec_logger.error.assert_called_once()
+    assert "Signature verification failed" in mock_sec_logger.error.call_args[0][0]
 
 
 @freeze_time("2025-05-04 18:35:00")
@@ -904,6 +916,8 @@ async def test_access_tasks_expired_token(
         algorithm=settings.JWT_ALGORITHM
     )
 
+    mock_sec_logger = mocker.patch("app.core.security.logger")
+
     # 2. Tente acessar a API com o token expirado
     url = f"{settings.API_V1_STR}/tasks/"
     invalid_headers = {"Authorization": f"Bearer {expired_token}"}
@@ -911,6 +925,8 @@ async def test_access_tasks_expired_token(
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
+    mock_sec_logger.error.assert_called_once()
+    assert "Signature has expired" in mock_sec_logger.error.call_args[0][0]
 
 @pytest.mark.parametrize(
     "param_name, injected_value", [

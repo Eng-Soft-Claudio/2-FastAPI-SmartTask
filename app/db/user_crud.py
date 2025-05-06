@@ -5,25 +5,30 @@ from typing import Optional, List
 import uuid
 from datetime import datetime, timezone
 from pymongo.errors import DuplicateKeyError
-
 from app.models.user import UserCreate, UserInDB, UserUpdate
 from app.core.security import get_password_hash
-
 from motor.motor_asyncio import AsyncIOMotorDatabase
+
+# Logger
+logger = logging.getLogger(__name__)
 
 # Nome da coleção de usuários
 USERS_COLLECTION = "users"
 
+# ==================================================
 # --- Funções CRUD para Usuários ---
+# ==================================================
+
 
 async def get_user_by_id(db: AsyncIOMotorDatabase, user_id: uuid.UUID) -> Optional[UserInDB]:
     """Busca um usuário pelo seu ID (UUID)."""
     user_dict = await db[USERS_COLLECTION].find_one({"id": str(user_id)})
     if user_dict:
-        user_dict.pop('_id', None) # Remove _id do mongo
+        user_dict.pop('_id', None) 
         try:
              return UserInDB.model_validate(user_dict)
-        except Exception: # Tratamento básico de erro de validação
+        except Exception as e:
+             logger.error(f"DB Validation error get_user_by_id {user_id}: {e}") 
              return None
     return None
 
@@ -35,7 +40,8 @@ async def get_user_by_username(db: AsyncIOMotorDatabase, username: str) -> Optio
          user_dict.pop('_id', None)
          try:
             return UserInDB.model_validate(user_dict)
-         except Exception:
+         except Exception as e:
+            logger.error(f"DB Validation error get_user_by_username {username}: {e}")
             return None
     return None
 
@@ -47,7 +53,8 @@ async def get_user_by_email(db: AsyncIOMotorDatabase, email: str) -> Optional[Us
         user_dict.pop('_id', None)
         try:
             return UserInDB.model_validate(user_dict)
-        except Exception:
+        except Exception as e:
+            logger.error(f"DB Validation error get_user_by_email {email}: {e}")
             return None
     return None
 
@@ -61,7 +68,7 @@ async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional
         "email": user_in.email,
         "hashed_password": hashed_password,
         "full_name": user_in.full_name,
-        "disabled": False, # Novo usuário começa ativo
+        "disabled": False, 
         "created_at": datetime.now(timezone.utc),
         "updated_at": None
     }
@@ -69,9 +76,8 @@ async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional
     try:
         user_db_obj = UserInDB.model_validate(user_db_data)
     except Exception as validation_error:
-        # Logar validation_error seria importante
-        print(f"Erro de validação Pydantic ao criar user_db_obj: {validation_error}")
-        return None # Ou levantar uma exceção customizada
+        logger.error(f"Erro de validação Pydantic ao criar user_db_obj: {validation_error}")
+        return None
 
     # Converte para dicionário para inserir no Mongo
     user_db_dict = user_db_obj.model_dump(mode="json")
@@ -79,27 +85,23 @@ async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional
     try:
         insert_result = await db[USERS_COLLECTION].insert_one(user_db_dict)
         if not insert_result.acknowledged:
-             # Logar erro
-             return None
-         # Retorna o objeto UserInDB validado (não o dict)
+            logger.error(f"DB Insert User Acknowledged False for username {user_in.username}")
+            return None
+        # Retorna o objeto UserInDB validado
         return user_db_obj
     except DuplicateKeyError:
-        # Este erro ocorreria se tivéssemos índices únicos no Mongo
-        # Vamos tratar isso no endpoint que chama esta função
-        raise # Re-lança a exceção para ser tratada na rota
+        raise 
     except Exception as e:
-         # Logar erro 'e'
-         print(f"Erro inesperado ao inserir usuário no DB: {e}")
-         return None
-
+        logger.exception(f"Erro inesperado ao inserir usuário {user_in.username} no DB: {e}")
+        return None
 
 # Adicionar funções de update e delete se necessário
 # async def update_user(...)
 # async def delete_user(...)
 
-# --- Configuração de Índices MongoDB (Importante!) ---
-# Esta função pode ser chamada uma vez na inicialização da aplicação
-# ou você pode criar os índices manualmente no Atlas/Mongo Shell.
+# ==================================================
+# --- Configuração de Índices MongoDB ---
+# ==================================================
 async def create_user_indexes(db: AsyncIOMotorDatabase):
     """Cria índices únicos para username e email se não existirem."""
     collection = db[USERS_COLLECTION]

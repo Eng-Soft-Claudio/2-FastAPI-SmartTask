@@ -41,7 +41,7 @@ class UserInDBBase(UserBase):
     """Modelo de usuário como armazenado no banco, incluindo ID e senha hasheada."""
     id: uuid.UUID = Field(..., title="ID Único do Usuário")
     hashed_password: str = Field(..., title="Senha Hasheada")
-    created_at: datetime = Field(default_factory=datetime.now(timezone.utc), title="Data de Criação")
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), title="Data de Criação")
     updated_at: Optional[datetime] = Field(None, title="Data da Última Atualização")
     model_config = ConfigDict(from_attributes=True)
 

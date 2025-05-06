@@ -54,8 +54,3 @@ def get_database() -> motor.motor_asyncio.AsyncIOMotorDatabase:
         logger.error("Tentativa de obter instância do DB antes da inicialização!")
         raise RuntimeError("A conexão com o banco de dados não foi inicializada.")
     return db_instance
-
-# Você pode também querer uma função para obter coleções específicas:
-# def get_task_collection() -> motor.motor_asyncio.AsyncIOMotorCollection:
-#     db = get_database()
-#     return db.get_collection("tasks") # Nome da coleção de tarefas

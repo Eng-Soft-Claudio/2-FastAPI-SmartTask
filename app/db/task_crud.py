@@ -3,12 +3,13 @@ import logging
 import uuid
 from datetime import date, datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
-
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 from pymongo import ASCENDING, DESCENDING
 from pydantic import ValidationError
-
 from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus 
+
+# Looger
+logger = logging.getLogger(__name__)
 
 # Nome da coleção no MongoDB para tarefas
 TASKS_COLLECTION = "tasks"
@@ -22,7 +23,10 @@ def _get_tasks_collection(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
 def _parse_sort_params(sort_by: Optional[str], sort_order: str) -> Optional[List[Tuple[str, int]]]:
     """Converte parâmetros de sort em formato para pymongo."""
     if sort_by in ["priority_score", "due_date", "created_at", "importance"]:
-        mongo_order = DESCENDING if sort_order.lower() == "desc" else ASCENDING
+        if sort_order.lower() == "asc":
+             mongo_order = ASCENDING
+        else:
+             mongo_order = DESCENDING
         return [(sort_by, mongo_order)]
     return None
 
@@ -43,7 +47,7 @@ async def create_task(db: AsyncIOMotorDatabase, task_db: Task) -> Optional[Task]
         else:
             return None
     except Exception as e:
-        print(f"DB Error creating task: {e}") 
+        logger.exception(f"DB Error creating task for owner {task_db.owner_id}: {e}")
         return None
 
 async def get_task_by_id(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uuid.UUID) -> Optional[Task]:
@@ -55,7 +59,7 @@ async def get_task_by_id(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id:
         try:
             return Task.model_validate(task_dict)
         except (ValidationError, Exception) as e:
-            print(f"DB Validation error get_task_by_id {task_id}: {e}") 
+            logger.error(f"DB Validation error get_task_by_id {task_id} for owner {owner_id}: {e}")
             return None 
     return None
 
@@ -103,11 +107,11 @@ async def get_tasks_by_owner(
             try:
                 validated_tasks.append(Task.model_validate(task_dict))
             except (ValidationError, Exception) as e:
-                 print(f"DB Validation error list_tasks {task_dict.get('id')}: {e}") 
+                 logger.error(f"DB Validation error list_tasks owner {owner_id} task {task_dict.get('id', 'N/A')}: {e}")
                  continue 
         return validated_tasks
     except Exception as e:
-        print(f"DB Error listing tasks for owner {owner_id}: {e}") 
+        logger.exception(f"DB Error listing tasks for owner {owner_id}: {e}")
         return []
 
 
@@ -137,12 +141,12 @@ async def update_task(
             try:
                 return Task.model_validate(updated_task_dict_raw)
             except (ValidationError, Exception) as e:
-                 print(f"DB Validation error update_task {task_id}: {e}") 
-                 return None
+                logger.error(f"DB Validation error update_task {task_id} owner {owner_id}: {e}") 
+                return None
         else:
             return None 
     except Exception as e:
-        print(f"DB Error updating task {task_id}: {e}") 
+        logger.exception(f"DB Error updating task {task_id} owner {owner_id}: {e}")
         return None
 
 
@@ -156,7 +160,7 @@ async def delete_task(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uu
         delete_result = await collection.delete_one({"id": str(task_id), "owner_id": str(owner_id)})
         return delete_result.deleted_count == 1
     except Exception as e:
-        print(f"DB Error deleting task {task_id}: {e}") 
+        logger.exception(f"DB Error deleting task {task_id} owner {owner_id}: {e}")
         return False
     
 async def create_task_indexes(db: AsyncIOMotorDatabase):

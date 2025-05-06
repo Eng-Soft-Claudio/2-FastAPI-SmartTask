@@ -1,7 +1,4 @@
 # app/main.py
-
-# Importações
-import logging
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
 from app.routers import tasks
@@ -10,10 +7,35 @@ from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
 from app.db.task_crud import create_task_indexes
 from app.core.config import settings
+import logging
+import sys
+from loguru import logger as loguru_logger 
 
-# Configuração básica de logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Interceptar logs padrão do Python com Loguru
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            level = loguru_logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        loguru_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+# Configurar Loguru 
+loguru_logger.remove() 
+loguru_logger.add(
+    sys.stderr,
+    level="INFO", 
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+)
+# Capturar logs do logging padrão 
+logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+logger = loguru_logger
 
 # Gerenciador de contexto de vida útil (eventos startup/shutdown)
 # Docs: https://fastapi.tiangolo.com/advanced/events/#lifespan
@@ -66,15 +88,10 @@ app.include_router(tasks.router, prefix=settings.API_V1_STR)
 # Endpoint Raiz
 @app.get("/", tags=["Root"]) 
 async def read_root():
-    return {"message": "Bem-vindo à {settings.PROJECT_NAME}!"}
+    return {"message": f"Bem-vindo à {settings.PROJECT_NAME}!"}
 
-# Adicione aqui mais endpoints e lógica da aplicação futuramente...
 
-# (Para rodar localmente com Uvicorn, você usará o comando no terminal,
-#  mas esta seção é útil se você fosse rodar o script diretamente)
 if __name__ == "__main__":
     import uvicorn
-    # Roda a aplicação usando o Uvicorn
-    # host="0.0.0.0" permite acesso de fora do container/máquina local
     reload=True # reinicia o servidor automaticamente ao salvar alterações 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
