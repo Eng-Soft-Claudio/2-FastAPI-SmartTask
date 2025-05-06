@@ -2,38 +2,39 @@
 ÍNDICE DOS ARQUIVOS PYTHON
 =========================
 
-1. app/core/config.py                                 (127 linhas)
+1. app/core/config.py                                 (132 linhas)
 2. app/core/dependencies.py                           (84 linhas)
 3. app/core/email.py                                  (107 linhas)
-4. app/core/security.py                               (95 linhas)
-5. app/core/utils.py                                  (154 linhas)
-6. app/db/mongodb_utils.py                            (56 linhas)
-7. app/db/task_crud.py                                (184 linhas)
-8. app/db/user_crud.py                                (113 linhas)
-9. app/main.py                                        (97 linhas)
-10. app/models/task.py                                 (98 linhas)
-11. app/models/token.py                                (15 linhas)
-12. app/models/user.py                                 (56 linhas)
-13. app/routers/auth.py                                (118 linhas)
-14. app/routers/tasks.py                               (324 linhas)
-15. app/worker.py                                      (133 linhas)
-16. tests/conftest.py                                  (150 linhas)
-17. tests/test_auth.py                                 (233 linhas)
-18. tests/test_core_config.py                          (97 linhas)
-19. tests/test_core_dependencies.py                    (109 linhas)
-20. tests/test_core_email.py                           (235 linhas)
-21. tests/test_core_security.py                        (43 linhas)
-22. tests/test_core_utils.py                           (136 linhas)
-23. tests/test_core_utils_webhooks.py                  (148 linhas)
-24. tests/test_db_task_crud.py                         (345 linhas)
-25. tests/test_main.py                                 (86 linhas)
-26. tests/test_tasks.py                                (1064 linhas)
-27. tests/test_worker.py                               (343 linhas)
+4. app/core/logging_config.py                         (48 linhas)
+5. app/core/security.py                               (95 linhas)
+6. app/core/utils.py                                  (154 linhas)
+7. app/db/mongodb_utils.py                            (56 linhas)
+8. app/db/task_crud.py                                (184 linhas)
+9. app/db/user_crud.py                                (113 linhas)
+10. app/main.py                                        (139 linhas)
+11. app/models/task.py                                 (98 linhas)
+12. app/models/token.py                                (15 linhas)
+13. app/models/user.py                                 (56 linhas)
+14. app/routers/auth.py                                (118 linhas)
+15. app/routers/tasks.py                               (324 linhas)
+16. app/worker.py                                      (133 linhas)
+17. tests/conftest.py                                  (150 linhas)
+18. tests/test_auth.py                                 (233 linhas)
+19. tests/test_core_config.py                          (97 linhas)
+20. tests/test_core_dependencies.py                    (109 linhas)
+21. tests/test_core_email.py                           (235 linhas)
+22. tests/test_core_security.py                        (43 linhas)
+23. tests/test_core_utils.py                           (136 linhas)
+24. tests/test_core_utils_webhooks.py                  (148 linhas)
+25. tests/test_db_task_crud.py                         (345 linhas)
+26. tests/test_main.py                                 (86 linhas)
+27. tests/test_tasks.py                                (1064 linhas)
+28. tests/test_worker.py                               (343 linhas)
 
 ==================================================
 
 
---- Início de app/core/config.py (127 linhas) ---
+--- Início de app/core/config.py (132 linhas) ---
 # app/core/config.py
 import os
 from pydantic_settings import BaseSettings
@@ -136,6 +137,11 @@ class Settings(BaseSettings):
         None, 
         description="URL de conexão do Redis para filas de tarefas (ARQ)."
     )
+
+    # --- Configuração de Logging ---
+    LOG_LEVEL: str = Field("INFO",
+                           description="Nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+                           )
 
     # --- Configurações CORS ---
 
@@ -357,6 +363,56 @@ async def send_urgent_task_notification(
                        f"Prioridade: {priority_score:.2f}, Vencimento: {task_due_date or 'N/A'}.\n"
                        f"{'Acesse a tarefa aqui: ' + task_link if task_link else ''}"
     )--- Fim de app/core/email.py ---
+
+--- Início de app/core/logging_config.py (48 linhas) ---
+# app/core/logging_config.py
+import logging
+import sys
+from loguru import logger as loguru_logger
+
+# Handler para interceptar logs padrão
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            level = loguru_logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame, depth = logging.currentframe(), 2
+        while hasattr(frame, "f_code") and frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            if frame is None:
+                break # Segurança caso frame seja None
+            depth += 1
+
+        # Verificar se frame não é None antes de acessar f_code
+        loguru_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+
+def setup_logging(log_level: str = "INFO"):
+    """Configura o Loguru para interceptar logs padrão."""
+    log_level = log_level.upper() # Garante que o nível seja maiúsculo
+    loguru_logger.remove() # Remove handlers padrão
+    loguru_logger.add(
+        sys.stderr,
+        level=log_level, # Usa o nível passado como argumento
+        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+        enqueue=True, # Torna assíncrono 
+        diagnose=False # Não mostrar variáveis locais no traceback por padrão
+    )
+    # Configura o logging padrão para usar nosso handler
+    logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+
+    # Configura loggers de bibliotecas específicas (opcional)
+    # logging.getLogger("uvicorn.access").disabled = True # Exemplo: silenciar logs de acesso do uvicorn
+    # logging.getLogger("uvicorn.error").propagate = False # Exemplo
+    # loguru_logger.disable("httpx") # Exemplo: silenciar logs de debug do httpx
+
+    # Define qual logger será usado globalmente se necessário
+    # Neste caso, outros módulos podem continuar usando logging.getLogger()
+    # pois o basicConfig acima configura o handler raiz.
+    # Alternativamente, poderíamos fazer 'main.logger = loguru_logger'
+    # e outros módulos importarem 'from app.main import logger'.--- Fim de app/core/logging_config.py ---
 
 --- Início de app/core/security.py (95 linhas) ---
 # app/core/security.py
@@ -971,104 +1027,146 @@ async def create_user_indexes(db: AsyncIOMotorDatabase):
     except Exception as e:
         logging.error(f"Erro ao criar índices de usuário: {e}")--- Fim de app/db/user_crud.py ---
 
---- Início de app/main.py (97 linhas) ---
+--- Início de app/main.py (139 linhas) ---
 # app/main.py
+
+# ========================
+# --- Importações ---
+# ========================
+import logging
+import sys
 from fastapi import FastAPI
-from fastapi.concurrency import asynccontextmanager
+from fastapi.middleware.cors import CORSMiddleware 
+from contextlib import asynccontextmanager 
+
+# --- Módulos da Aplicação ---
 from app.routers import tasks
 from app.routers import auth
 from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
 from app.db.task_crud import create_task_indexes
 from app.core.config import settings
-import logging
-import sys
-from loguru import logger as loguru_logger 
+# Importar a função de setup e o InterceptHandler
+from app.core.logging_config import setup_logging, InterceptHandler
 
-# Interceptar logs padrão do Python com Loguru
-class InterceptHandler(logging.Handler):
-    def emit(self, record):
-        try:
-            level = loguru_logger.level(record.levelname).name
-        except ValueError:
-            level = record.levelno
+# ===============================
+# --- Configuração de Logging ---
+# ===============================
 
-        frame, depth = logging.currentframe(), 2
-        while frame.f_code.co_filename == logging.__file__:
-            frame = frame.f_back
-            depth += 1
+# Chamar a configuração de logging ANTES de qualquer log da aplicação
+setup_logging(log_level=settings.LOG_LEVEL)
 
-        loguru_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+# Obter um logger para este módulo (main.py)
+logger = logging.getLogger(__name__) 
 
-# Configurar Loguru 
-loguru_logger.remove() 
-loguru_logger.add(
-    sys.stderr,
-    level="INFO", 
-    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-)
-# Capturar logs do logging padrão 
-logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
-logger = loguru_logger
 
-# Gerenciador de contexto de vida útil (eventos startup/shutdown)
-# Docs: https://fastapi.tiangolo.com/advanced/events/#lifespan
+# ==================================
+# --- Ciclo de Vida (Lifespan) ---
+# ==================================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Gerencia o ciclo de vida da aplicação: conecta ao DB e cria índices no startup,
+    e fecha a conexão no shutdown.
+    """
+    logger.info("Iniciando ciclo de vida da aplicação...")
     db_connection = await connect_to_mongo()
-    if db_connection is None:
-         logger.critical("Falha fatal ao conectar ao MongoDB na inicialização.")
-         yield 
-         return
 
+    if db_connection is None:
+         logger.critical("Falha fatal ao conectar ao MongoDB na inicialização. App pode não funcionar corretamente.")
+         yield 
+         logger.info("Encerrando ciclo de vida (conexão DB falhou no início).")
+         return 
+
+    # Conexão bem-sucedida, define o estado
     app.state.db = db_connection
     logger.info("Conectado ao MongoDB.")
+
+    # Tenta criar índices
     try:
-        db_instance = app.state.db
+        db_instance = app.state.db 
+        logger.info("Tentando criar/verificar índices...")
         await create_user_indexes(db_instance)
-        await create_task_indexes(db_instance) 
+        await create_task_indexes(db_instance)
+        logger.info("Criação/verificação de índices concluída.")
     except Exception as e:
         logger.error(f"Erro durante a criação de índices: {e}", exc_info=True)
 
-    # Permite que a aplicação rode
-    yield
+    # Aplicação pronta para receber requisições
+    logger.info("Aplicação iniciada e pronta.")
+    yield 
 
-    # Código de shutdown (executa ao parar a app)
+    # Código de Shutdown
+    logger.info("Iniciando processo de encerramento...")
     await close_mongo_connection()
     logger.info("Conexão com MongoDB fechada.")
-    
-# Instância FastAPI
+    logger.info("Aplicação encerrada.")
+
+
+# =========================
+# --- Instância FastAPI ---
+# =========================
 app = FastAPI(
-    title="SmartTask API",
+    title=settings.PROJECT_NAME, 
     description="API RESTful para gerenciamento de tarefas com prioridade inteligente.",
     version="0.1.0",
     contact={
         "name": "Eng. Soft. Cláudio",
-        "url": "https://www.linkedin.com/in/claudiodelimatosta/", 
-        "email": "claudiodelimatosta@gmail.com", 
+        "url": "https://www.linkedin.com/in/claudiodelimatosta/",
+        "email": "claudiodelimatosta@gmail.com",
     },
     license_info={
         "name": "MIT License",
         "url": "https://opensource.org/licenses/MIT",
     },
-    lifespan=lifespan
+    lifespan=lifespan # Define o ciclo de vida
 )
 
-# Inclusões
-app.include_router(auth.router, prefix=f"{settings.API_V1_STR}/auth")
-app.include_router(tasks.router, prefix=settings.API_V1_STR)
+# =========================
+# --- Middlewares ---
+# =========================
 
+# Configurar CORS
+if settings.CORS_ALLOWED_ORIGINS: 
+    logger.info(f"Configurando CORS para origens: {settings.CORS_ALLOWED_ORIGINS}")
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=settings.CORS_ALLOWED_ORIGINS, 
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+else:
+    logger.warning("Nenhuma origem CORS configurada (settings.CORS_ALLOWED_ORIGINS está vazia). API pode não ser acessível de frontends em outros domínios.")
+# ======================
+# --- Rotas (Routers) ---
+# ======================
+app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Authentication"]) # Prefixo padrão
+app.include_router(tasks.router, prefix=settings.API_V1_STR, tags=["Tasks"]) # Prefixo padrão
 
-# Endpoint Raiz
-@app.get("/", tags=["Root"]) 
+# =====================
+# --- Endpoint Raiz ---
+# =====================
+@app.get("/", tags=["Root"])
 async def read_root():
+    """Endpoint raiz para verificar se a API está online."""
     return {"message": f"Bem-vindo à {settings.PROJECT_NAME}!"}
 
 
+# =============================
+# --- Execução (Uvicorn) ---
+# =============================
 if __name__ == "__main__":
     import uvicorn
-    reload=True # reinicia o servidor automaticamente ao salvar alterações 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)--- Fim de app/main.py ---
+    logger.info("Iniciando servidor Uvicorn para desenvolvimento...")
+    # 'reload=True' para hot-reload durante desenvolvimento, desativar em produção
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level=settings.LOG_LEVEL.lower() 
+    )--- Fim de app/main.py ---
 
 --- Início de app/models/task.py (98 linhas) ---
 # app/models/task.py

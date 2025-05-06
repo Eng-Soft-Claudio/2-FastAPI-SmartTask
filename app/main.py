@@ -89,7 +89,7 @@ app = FastAPI(
         "name": "MIT License",
         "url": "https://opensource.org/licenses/MIT",
     },
-    lifespan=lifespan # Define o ciclo de vida
+    lifespan=lifespan 
 )
 
 # =========================
@@ -107,13 +107,12 @@ if settings.CORS_ALLOWED_ORIGINS:
         allow_headers=["*"],
     )
 else:
-     logger.warning("Nenhuma origem CORS configurada (settings.CORS_ALLOWED_ORIGINS está vazia).")
-
+    logger.warning("Nenhuma origem CORS configurada (settings.CORS_ALLOWED_ORIGINS está vazia). API pode não ser acessível de frontends em outros domínios.")
 # ======================
 # --- Rotas (Routers) ---
 # ======================
-app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Authentication"]) # Prefixo padrão
-app.include_router(tasks.router, prefix=settings.API_V1_STR, tags=["Tasks"]) # Prefixo padrão
+app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Authentication"]) 
+app.include_router(tasks.router, prefix=settings.API_V1_STR, tags=["Tasks"]) 
 
 # =====================
 # --- Endpoint Raiz ---
