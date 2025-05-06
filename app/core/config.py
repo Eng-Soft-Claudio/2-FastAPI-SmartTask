@@ -101,6 +101,11 @@ class Settings(BaseSettings):
         description="URL de conexão do Redis para filas de tarefas (ARQ)."
     )
 
+    # --- Configuração de Logging ---
+    LOG_LEVEL: str = Field("INFO",
+                           description="Nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+                           )
+
     # --- Configurações CORS ---
 
     # --- Configuração Pydantic (case-insensitive)---

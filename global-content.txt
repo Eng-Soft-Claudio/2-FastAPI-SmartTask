@@ -5,12 +5,12 @@
 1. app/core/config.py                                 (127 linhas)
 2. app/core/dependencies.py                           (84 linhas)
 3. app/core/email.py                                  (107 linhas)
-4. app/core/security.py                               (113 linhas)
+4. app/core/security.py                               (95 linhas)
 5. app/core/utils.py                                  (154 linhas)
-6. app/db/mongodb_utils.py                            (61 linhas)
-7. app/db/task_crud.py                                (180 linhas)
-8. app/db/user_crud.py                                (111 linhas)
-9. app/main.py                                        (80 linhas)
+6. app/db/mongodb_utils.py                            (56 linhas)
+7. app/db/task_crud.py                                (184 linhas)
+8. app/db/user_crud.py                                (113 linhas)
+9. app/main.py                                        (97 linhas)
 10. app/models/task.py                                 (98 linhas)
 11. app/models/token.py                                (15 linhas)
 12. app/models/user.py                                 (56 linhas)
@@ -25,9 +25,10 @@
 21. tests/test_core_security.py                        (43 linhas)
 22. tests/test_core_utils.py                           (136 linhas)
 23. tests/test_core_utils_webhooks.py                  (148 linhas)
-24. tests/test_main.py                                 (90 linhas)
-25. tests/test_tasks.py                                (1048 linhas)
-26. tests/test_worker.py                               (343 linhas)
+24. tests/test_db_task_crud.py                         (345 linhas)
+25. tests/test_main.py                                 (86 linhas)
+26. tests/test_tasks.py                                (1064 linhas)
+27. tests/test_worker.py                               (343 linhas)
 
 ==================================================
 
@@ -357,21 +358,23 @@ async def send_urgent_task_notification(
                        f"{'Acesse a tarefa aqui: ' + task_link if task_link else ''}"
     )--- Fim de app/core/email.py ---
 
---- Início de app/core/security.py (113 linhas) ---
+--- Início de app/core/security.py (95 linhas) ---
 # app/core/security.py
 from datetime import datetime, timedelta, timezone
 from typing import Any, Union, Optional
 from passlib.context import CryptContext
 from jose import jwt, JWTError
-from pydantic import ValidationError # Para erros de validação de token
+from pydantic import ValidationError 
+import logging
+from app.core.config import settings 
+from app.models.token import TokenPayload
 
-from app.core.config import settings # Importa configurações (SECRET_KEY, etc.)
-from app.models.token import TokenPayload # Modelo para dados do payload
+# Logger
+logger = logging.getLogger(__name__)
 
+# ===================================================
 # --- Configuração do Hashing de Senha ---
-# Define o contexto do passlib, especificando os esquemas de hash permitidos
-# 'bcrypt' será o padrão para novas senhas. Outros são para senhas legadas (se houver)
-# 'deprecated="auto"' significa que senhas com esquemas antigos serão automaticamente atualizadas para bcrypt no login
+# ===================================================
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 ALGORITHM = settings.JWT_ALGORITHM
@@ -389,9 +392,14 @@ def get_password_hash(password: str) -> str:
     """Gera o hash de uma senha usando bcrypt."""
     return pwd_context.hash(password)
 
+# ===================================================
 # --- Funções JWT ---
+# ===================================================
 
-def create_access_token(subject: Union[str, Any],username: str, expires_delta: Optional[timedelta] = None) -> str:
+def create_access_token(subject: Union[str, Any],
+                        username: str,
+                        expires_delta: Optional[timedelta] = None
+                        ) -> str:
     """
     Cria um novo token de acesso JWT.
 
@@ -407,30 +415,23 @@ def create_access_token(subject: Union[str, Any],username: str, expires_delta: O
     else:
         expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
 
-    # Garante que o subject (ID do usuário) seja uma string para o JWT
-    # Embora Any seja aceito, geralmente é um ID (UUID, int, str)
     subject_str = str(subject)
 
     to_encode = {
         "exp": expire,
-        "sub": subject_str, # User ID
-        "username": username # Username
+        "sub": subject_str, 
+        "username": username 
     }
 
-    # Adicione outros dados ao payload se necessário (cuidado com o tamanho do token)
-    # to_encode.update({"username": username_do_subject})
 
     encoded_jwt = jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
     return encoded_jwt
 
-
 def decode_token(token: str) -> Optional[TokenPayload]:
     """
     Decodifica um token JWT e valida seu conteúdo.
-
     Args:
         token: O token JWT string.
-
     Returns:
         Um objeto TokenPayload com os dados do token se válido, None caso contrário.
     """
@@ -442,34 +443,16 @@ def decode_token(token: str) -> Optional[TokenPayload]:
             algorithms=[ALGORITHM]
         )
 
-        # Extrai os dados esperados (subject/user_id)
-        # subject = payload.get("sub") # 'sub' é o id do usuário (UUID string)
-        # username = payload.get("username") # Se incluímos o username no token
-
-        # if subject is None: # or username is None:
-        #     return None
-
-        # Valida os dados do payload com o modelo Pydantic
-        # Isso garante que os tipos e campos esperados estejam presentes
         token_data = TokenPayload.model_validate(payload)
 
-        # Verifica se o token expirou (embora jwt.decode geralmente faça isso)
         if token_data.exp is not None:
              if datetime.now(timezone.utc) > datetime.fromtimestamp(token_data.exp, tz=timezone.utc):
-                 # Poderia levantar uma exceção específica de expiração aqui
                  return None # Ou trate como inválido
-
-        # Aqui poderíamos converter o 'sub' (string UUID) de volta para UUID se necessário
-        # try:
-        #     token_data.sub = uuid.UUID(token_data.sub)
-        # except ValueError:
-        #     return None # ID inválido no token
 
         return token_data
 
     except (JWTError, ValidationError, KeyError) as e:
-        # Logar o erro `e` aqui seria útil para depuração
-        print(f"Erro ao decodificar token: {e}") # Log de erro simples
+        logger.error(f"Erro ao decodificar/validar token: {e}", exc_info=True)
         return None--- Fim de app/core/security.py ---
 
 --- Início de app/core/utils.py (154 linhas) ---
@@ -628,7 +611,7 @@ async def send_webhook_notification(
     except Exception as e:
          logger.exception(f"Erro inesperado ao enviar webhook para {webhook_url_str}: {e}")--- Fim de app/core/utils.py ---
 
---- Início de app/db/mongodb_utils.py (61 linhas) ---
+--- Início de app/db/mongodb_utils.py (56 linhas) ---
 # app/db/mongodb_utils.py
 from typing import Optional
 import motor.motor_asyncio
@@ -685,24 +668,21 @@ def get_database() -> motor.motor_asyncio.AsyncIOMotorDatabase:
         logger.error("Tentativa de obter instância do DB antes da inicialização!")
         raise RuntimeError("A conexão com o banco de dados não foi inicializada.")
     return db_instance
+--- Fim de app/db/mongodb_utils.py ---
 
-# Você pode também querer uma função para obter coleções específicas:
-# def get_task_collection() -> motor.motor_asyncio.AsyncIOMotorCollection:
-#     db = get_database()
-#     return db.get_collection("tasks") # Nome da coleção de tarefas--- Fim de app/db/mongodb_utils.py ---
-
---- Início de app/db/task_crud.py (180 linhas) ---
+--- Início de app/db/task_crud.py (184 linhas) ---
 # app/db/task_crud.py
 import logging
 import uuid
 from datetime import date, datetime, timezone
 from typing import List, Optional, Dict, Any, Tuple
-
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 from pymongo import ASCENDING, DESCENDING
 from pydantic import ValidationError
-
 from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus 
+
+# Looger
+logger = logging.getLogger(__name__)
 
 # Nome da coleção no MongoDB para tarefas
 TASKS_COLLECTION = "tasks"
@@ -716,7 +696,10 @@ def _get_tasks_collection(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
 def _parse_sort_params(sort_by: Optional[str], sort_order: str) -> Optional[List[Tuple[str, int]]]:
     """Converte parâmetros de sort em formato para pymongo."""
     if sort_by in ["priority_score", "due_date", "created_at", "importance"]:
-        mongo_order = DESCENDING if sort_order.lower() == "desc" else ASCENDING
+        if sort_order.lower() == "asc":
+             mongo_order = ASCENDING
+        else:
+             mongo_order = DESCENDING
         return [(sort_by, mongo_order)]
     return None
 
@@ -737,7 +720,7 @@ async def create_task(db: AsyncIOMotorDatabase, task_db: Task) -> Optional[Task]
         else:
             return None
     except Exception as e:
-        print(f"DB Error creating task: {e}") 
+        logger.exception(f"DB Error creating task for owner {task_db.owner_id}: {e}")
         return None
 
 async def get_task_by_id(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uuid.UUID) -> Optional[Task]:
@@ -749,7 +732,7 @@ async def get_task_by_id(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id:
         try:
             return Task.model_validate(task_dict)
         except (ValidationError, Exception) as e:
-            print(f"DB Validation error get_task_by_id {task_id}: {e}") 
+            logger.error(f"DB Validation error get_task_by_id {task_id} for owner {owner_id}: {e}")
             return None 
     return None
 
@@ -797,11 +780,11 @@ async def get_tasks_by_owner(
             try:
                 validated_tasks.append(Task.model_validate(task_dict))
             except (ValidationError, Exception) as e:
-                 print(f"DB Validation error list_tasks {task_dict.get('id')}: {e}") 
+                 logger.error(f"DB Validation error list_tasks owner {owner_id} task {task_dict.get('id', 'N/A')}: {e}")
                  continue 
         return validated_tasks
     except Exception as e:
-        print(f"DB Error listing tasks for owner {owner_id}: {e}") 
+        logger.exception(f"DB Error listing tasks for owner {owner_id}: {e}")
         return []
 
 
@@ -831,12 +814,12 @@ async def update_task(
             try:
                 return Task.model_validate(updated_task_dict_raw)
             except (ValidationError, Exception) as e:
-                 print(f"DB Validation error update_task {task_id}: {e}") 
-                 return None
+                logger.error(f"DB Validation error update_task {task_id} owner {owner_id}: {e}") 
+                return None
         else:
             return None 
     except Exception as e:
-        print(f"DB Error updating task {task_id}: {e}") 
+        logger.exception(f"DB Error updating task {task_id} owner {owner_id}: {e}")
         return None
 
 
@@ -850,7 +833,7 @@ async def delete_task(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uu
         delete_result = await collection.delete_one({"id": str(task_id), "owner_id": str(owner_id)})
         return delete_result.deleted_count == 1
     except Exception as e:
-        print(f"DB Error deleting task {task_id}: {e}") 
+        logger.exception(f"DB Error deleting task {task_id} owner {owner_id}: {e}")
         return False
     
 async def create_task_indexes(db: AsyncIOMotorDatabase):
@@ -873,7 +856,7 @@ async def create_task_indexes(db: AsyncIOMotorDatabase):
     except Exception as e:
         logging.error(f"Erro ao criar índices da coleção 'tasks': {e}")--- Fim de app/db/task_crud.py ---
 
---- Início de app/db/user_crud.py (111 linhas) ---
+--- Início de app/db/user_crud.py (113 linhas) ---
 # app/db/user_crud.py
 import logging
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
@@ -881,25 +864,30 @@ from typing import Optional, List
 import uuid
 from datetime import datetime, timezone
 from pymongo.errors import DuplicateKeyError
-
 from app.models.user import UserCreate, UserInDB, UserUpdate
 from app.core.security import get_password_hash
-
 from motor.motor_asyncio import AsyncIOMotorDatabase
+
+# Logger
+logger = logging.getLogger(__name__)
 
 # Nome da coleção de usuários
 USERS_COLLECTION = "users"
 
+# ==================================================
 # --- Funções CRUD para Usuários ---
+# ==================================================
+
 
 async def get_user_by_id(db: AsyncIOMotorDatabase, user_id: uuid.UUID) -> Optional[UserInDB]:
     """Busca um usuário pelo seu ID (UUID)."""
     user_dict = await db[USERS_COLLECTION].find_one({"id": str(user_id)})
     if user_dict:
-        user_dict.pop('_id', None) # Remove _id do mongo
+        user_dict.pop('_id', None) 
         try:
              return UserInDB.model_validate(user_dict)
-        except Exception: # Tratamento básico de erro de validação
+        except Exception as e:
+             logger.error(f"DB Validation error get_user_by_id {user_id}: {e}") 
              return None
     return None
 
@@ -911,7 +899,8 @@ async def get_user_by_username(db: AsyncIOMotorDatabase, username: str) -> Optio
          user_dict.pop('_id', None)
          try:
             return UserInDB.model_validate(user_dict)
-         except Exception:
+         except Exception as e:
+            logger.error(f"DB Validation error get_user_by_username {username}: {e}")
             return None
     return None
 
@@ -923,7 +912,8 @@ async def get_user_by_email(db: AsyncIOMotorDatabase, email: str) -> Optional[Us
         user_dict.pop('_id', None)
         try:
             return UserInDB.model_validate(user_dict)
-        except Exception:
+        except Exception as e:
+            logger.error(f"DB Validation error get_user_by_email {email}: {e}")
             return None
     return None
 
@@ -937,7 +927,7 @@ async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional
         "email": user_in.email,
         "hashed_password": hashed_password,
         "full_name": user_in.full_name,
-        "disabled": False, # Novo usuário começa ativo
+        "disabled": False, 
         "created_at": datetime.now(timezone.utc),
         "updated_at": None
     }
@@ -945,9 +935,8 @@ async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional
     try:
         user_db_obj = UserInDB.model_validate(user_db_data)
     except Exception as validation_error:
-        # Logar validation_error seria importante
-        print(f"Erro de validação Pydantic ao criar user_db_obj: {validation_error}")
-        return None # Ou levantar uma exceção customizada
+        logger.error(f"Erro de validação Pydantic ao criar user_db_obj: {validation_error}")
+        return None
 
     # Converte para dicionário para inserir no Mongo
     user_db_dict = user_db_obj.model_dump(mode="json")
@@ -955,27 +944,23 @@ async def create_user(db: AsyncIOMotorDatabase, user_in: UserCreate) -> Optional
     try:
         insert_result = await db[USERS_COLLECTION].insert_one(user_db_dict)
         if not insert_result.acknowledged:
-             # Logar erro
-             return None
-         # Retorna o objeto UserInDB validado (não o dict)
+            logger.error(f"DB Insert User Acknowledged False for username {user_in.username}")
+            return None
+        # Retorna o objeto UserInDB validado
         return user_db_obj
     except DuplicateKeyError:
-        # Este erro ocorreria se tivéssemos índices únicos no Mongo
-        # Vamos tratar isso no endpoint que chama esta função
-        raise # Re-lança a exceção para ser tratada na rota
+        raise 
     except Exception as e:
-         # Logar erro 'e'
-         print(f"Erro inesperado ao inserir usuário no DB: {e}")
-         return None
-
+        logger.exception(f"Erro inesperado ao inserir usuário {user_in.username} no DB: {e}")
+        return None
 
 # Adicionar funções de update e delete se necessário
 # async def update_user(...)
 # async def delete_user(...)
 
-# --- Configuração de Índices MongoDB (Importante!) ---
-# Esta função pode ser chamada uma vez na inicialização da aplicação
-# ou você pode criar os índices manualmente no Atlas/Mongo Shell.
+# ==================================================
+# --- Configuração de Índices MongoDB ---
+# ==================================================
 async def create_user_indexes(db: AsyncIOMotorDatabase):
     """Cria índices únicos para username e email se não existirem."""
     collection = db[USERS_COLLECTION]
@@ -986,11 +971,8 @@ async def create_user_indexes(db: AsyncIOMotorDatabase):
     except Exception as e:
         logging.error(f"Erro ao criar índices de usuário: {e}")--- Fim de app/db/user_crud.py ---
 
---- Início de app/main.py (80 linhas) ---
+--- Início de app/main.py (97 linhas) ---
 # app/main.py
-
-# Importações
-import logging
 from fastapi import FastAPI
 from fastapi.concurrency import asynccontextmanager
 from app.routers import tasks
@@ -999,10 +981,35 @@ from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
 from app.db.task_crud import create_task_indexes
 from app.core.config import settings
+import logging
+import sys
+from loguru import logger as loguru_logger 
 
-# Configuração básica de logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Interceptar logs padrão do Python com Loguru
+class InterceptHandler(logging.Handler):
+    def emit(self, record):
+        try:
+            level = loguru_logger.level(record.levelname).name
+        except ValueError:
+            level = record.levelno
+
+        frame, depth = logging.currentframe(), 2
+        while frame.f_code.co_filename == logging.__file__:
+            frame = frame.f_back
+            depth += 1
+
+        loguru_logger.opt(depth=depth, exception=record.exc_info).log(level, record.getMessage())
+
+# Configurar Loguru 
+loguru_logger.remove() 
+loguru_logger.add(
+    sys.stderr,
+    level="INFO", 
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+)
+# Capturar logs do logging padrão 
+logging.basicConfig(handlers=[InterceptHandler()], level=0, force=True)
+logger = loguru_logger
 
 # Gerenciador de contexto de vida útil (eventos startup/shutdown)
 # Docs: https://fastapi.tiangolo.com/advanced/events/#lifespan
@@ -1057,14 +1064,9 @@ app.include_router(tasks.router, prefix=settings.API_V1_STR)
 async def read_root():
     return {"message": f"Bem-vindo à {settings.PROJECT_NAME}!"}
 
-# Adicione aqui mais endpoints e lógica da aplicação futuramente...
 
-# (Para rodar localmente com Uvicorn, você usará o comando no terminal,
-#  mas esta seção é útil se você fosse rodar o script diretamente)
 if __name__ == "__main__":
     import uvicorn
-    # Roda a aplicação usando o Uvicorn
-    # host="0.0.0.0" permite acesso de fora do container/máquina local
     reload=True # reinicia o servidor automaticamente ao salvar alterações 
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)--- Fim de app/main.py ---
 
@@ -2994,7 +2996,354 @@ async def test_send_webhook_url_not_configured(mocker):
              "Webhook URL não configurada, pulando envio."
         )--- Fim de tests/test_core_utils_webhooks.py ---
 
---- Início de tests/test_main.py (90 linhas) ---
+--- Início de tests/test_db_task_crud.py (345 linhas) ---
+# tests/test_db_task_crud.py
+
+import pytest
+import uuid
+from datetime import date, datetime, timezone
+from unittest.mock import AsyncMock, MagicMock, patch # Para mocks
+from typing import List, Optional, Dict, Any
+
+# Importar pymongo e pydantic Error para simular falhas
+from pymongo import ASCENDING, DESCENDING # Usado para verificar sort
+from pydantic import ValidationError
+
+# Importar o módulo a ser testado e seus modelos
+from app.db import task_crud
+from app.models.task import Task, TaskStatus # Usar o modelo final para fixtures
+
+# --- Fixture de Dados de Teste (Mantida) ---
+@pytest.fixture
+def valid_task_obj() -> Task:
+    owner_id = uuid.uuid4()
+    return Task(
+        id=uuid.uuid4(),
+        owner_id=owner_id,
+        title="Test Task Title",
+        description="Test task description.",
+        importance=3,
+        status=TaskStatus.PENDING,
+        created_at=datetime.now(timezone.utc),
+    )
+
+# --- Testes para create_task ---
+
+@pytest.mark.asyncio
+async def test_create_task_success(valid_task_obj):
+    """Testa a criação bem-sucedida de uma tarefa."""
+    mock_collection = AsyncMock() # Mock síncrono da coleção
+    mock_insert_result = MagicMock()
+    mock_insert_result.acknowledged = True
+    mock_collection.insert_one = AsyncMock(return_value=mock_insert_result) # Mock async do método
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        created_task = await task_crud.create_task(db=MagicMock(), task_db=valid_task_obj) # db mockado simples
+
+    expected_dict = valid_task_obj.model_dump(mode='json')
+    mock_collection.insert_one.assert_awaited_once_with(expected_dict)
+    assert created_task == valid_task_obj
+
+@pytest.mark.asyncio
+async def test_create_task_db_not_acknowledged(valid_task_obj):
+    """Testa o que acontece se insert_one não for Acknowledged."""
+    mock_collection = AsyncMock()
+    mock_insert_result = MagicMock()
+    mock_insert_result.acknowledged = False
+    mock_collection.insert_one = AsyncMock(return_value=mock_insert_result)
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        created_task = await task_crud.create_task(db=MagicMock(), task_db=valid_task_obj)
+
+    mock_collection.insert_one.assert_awaited_once()
+    assert created_task is None
+
+@pytest.mark.asyncio
+async def test_create_task_db_exception(valid_task_obj, mocker):
+    """Testa o tratamento de exceção durante a inserção no DB."""
+    mock_collection = AsyncMock()
+    db_error = Exception("Simulated DB Error")
+    mock_collection.insert_one = AsyncMock(side_effect=db_error) # Mock com side_effect
+    mock_logger = mocker.patch("app.db.task_crud.logger")
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        created_task = await task_crud.create_task(db=MagicMock(), task_db=valid_task_obj)
+
+    mock_collection.insert_one.assert_awaited_once()
+    assert created_task is None
+    mock_logger.exception.assert_called_once()
+
+# --- Testes para get_task_by_id ---
+
+@pytest.mark.asyncio
+async def test_get_task_by_id_success(valid_task_obj):
+    """Testa a busca bem-sucedida por ID."""
+    mock_collection = MagicMock()
+    task_dict_from_db = valid_task_obj.model_dump(mode='json')
+    task_dict_from_db['_id'] = "some_mongo_id"
+    mock_collection.find_one = AsyncMock(return_value=task_dict_from_db) # Mock async
+
+    owner_id = valid_task_obj.owner_id
+    task_id = valid_task_obj.id
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        with patch("app.db.task_crud.Task.model_validate", return_value=valid_task_obj) as mock_validate:
+            found_task = await task_crud.get_task_by_id(db=MagicMock(), task_id=task_id, owner_id=owner_id)
+
+    expected_query = {"id": str(task_id), "owner_id": str(owner_id)}
+    mock_collection.find_one.assert_awaited_once_with(expected_query)
+    # Verifica se a validação foi chamada com o dicionário SEM o _id
+    expected_validate_dict = task_dict_from_db.copy()
+    expected_validate_dict.pop('_id', None)
+    mock_validate.assert_called_once_with(expected_validate_dict)
+    assert found_task == valid_task_obj
+
+@pytest.mark.asyncio
+async def test_get_task_by_id_not_found():
+    """Testa quando a tarefa não é encontrada no DB."""
+    mock_collection = MagicMock()
+    mock_collection.find_one = AsyncMock(return_value=None) # Mock async
+
+    task_id = uuid.uuid4()
+    owner_id = uuid.uuid4()
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        found_task = await task_crud.get_task_by_id(db=MagicMock(), task_id=task_id, owner_id=owner_id)
+
+    mock_collection.find_one.assert_awaited_once()
+    assert found_task is None
+
+@pytest.mark.asyncio
+async def test_get_task_by_id_validation_error(mocker):
+    """Testa quando os dados do DB falham na validação Pydantic."""
+    mock_collection = MagicMock()
+    invalid_task_dict = {"id": str(uuid.uuid4()), "owner_id": str(uuid.uuid4()), "title": "Invalid Task"}
+    mock_collection.find_one = AsyncMock(return_value=invalid_task_dict)
+    mock_logger = mocker.patch("app.db.task_crud.logger")
+
+    task_id = uuid.UUID(invalid_task_dict["id"])
+    owner_id = uuid.UUID(invalid_task_dict["owner_id"])
+
+    validation_error = ValidationError.from_exception_data(title='Task', line_errors=[])
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        with patch("app.db.task_crud.Task.model_validate", side_effect=validation_error):
+            found_task = await task_crud.get_task_by_id(db=MagicMock(), task_id=task_id, owner_id=owner_id)
+
+    mock_collection.find_one.assert_awaited_once()
+    assert found_task is None
+    mock_logger.error.assert_called_once()
+
+# --- Testes para get_tasks_by_owner ---
+
+@pytest.mark.asyncio
+async def test_get_tasks_by_owner_success_no_filters(valid_task_obj):
+    """Testa a listagem básica (mock simplificado)."""
+    owner_id = valid_task_obj.owner_id
+    task_dict = valid_task_obj.model_dump(mode='json')
+
+    # Mock para o cursor final que será iterado
+    mock_cursor = AsyncMock()
+    mock_cursor.__aiter__.return_value = [task_dict]
+
+    # Mock para o objeto chainable que find retorna
+    mock_chain = MagicMock()
+    mock_chain.skip.return_value = mock_chain # Retorna a si mesmo
+    mock_chain.limit.return_value = mock_cursor # O último método retorna o cursor iterável
+
+    # Mock para a coleção que retorna o objeto chainable
+    mock_collection = MagicMock()
+    mock_collection.find.return_value = mock_chain # find retorna o obj chainable
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        with patch("app.db.task_crud.Task.model_validate", return_value=valid_task_obj):
+            tasks = await task_crud.get_tasks_by_owner(db=MagicMock(), owner_id=owner_id, limit=50, skip=10)
+
+    expected_query = {"owner_id": str(owner_id)}
+    mock_collection.find.assert_called_once_with(expected_query)
+    mock_chain.skip.assert_called_once_with(10)
+    mock_chain.limit.assert_called_once_with(50)
+    assert len(tasks) == 1
+    assert tasks[0] == valid_task_obj
+
+@pytest.mark.asyncio
+async def test_get_tasks_by_owner_with_filters_and_sort(valid_task_obj):
+    """Testa listagem com filtros e sort (mock simplificado)."""
+    owner_id = valid_task_obj.owner_id
+    task_dict = valid_task_obj.model_dump(mode='json')
+
+    mock_cursor = AsyncMock()
+    mock_cursor.__aiter__.return_value = [task_dict]
+    mock_sort_chain = MagicMock()
+    mock_sort_chain.sort.return_value = mock_cursor # sort retorna cursor final
+    mock_limit_chain = MagicMock()
+    mock_limit_chain.limit.return_value = mock_sort_chain # limit retorna obj com sort
+    mock_skip_chain = MagicMock()
+    mock_skip_chain.skip.return_value = mock_limit_chain # skip retorna obj com limit
+    mock_collection = MagicMock()
+    mock_collection.find.return_value = mock_skip_chain # find retorna obj com skip
+
+    status_param = TaskStatus.PENDING
+    project = "TestProject"
+    sort_by = "created_at"
+    sort_order = "asc"
+    limit = 10
+    skip = 5
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        with patch("app.db.task_crud.Task.model_validate", return_value=valid_task_obj):
+            tasks = await task_crud.get_tasks_by_owner(
+                db=MagicMock(), owner_id=owner_id, status_filter=status_param,
+                project_filter=project, sort_by=sort_by, sort_order=sort_order,
+                limit=limit, skip=skip
+            )
+
+    expected_query = {"owner_id": str(owner_id), "status": status_param.value, "project": project}
+    mock_collection.find.assert_called_once_with(expected_query)
+    mock_skip_chain.skip.assert_called_once_with(skip)
+    mock_limit_chain.limit.assert_called_once_with(limit)
+    mock_sort_chain.sort.assert_called_once_with([(sort_by, ASCENDING)])
+    assert len(tasks) == 1
+    assert tasks[0] == valid_task_obj
+
+@pytest.mark.asyncio
+async def test_get_tasks_by_owner_validation_error_in_loop(valid_task_obj, mocker):
+    """Testa erro de validação no loop (mock simplificado)."""
+    owner_id = valid_task_obj.owner_id
+    valid_dict = valid_task_obj.model_dump(mode='json')
+    invalid_dict = {"id": str(uuid.uuid4()), "owner_id": str(owner_id), "_id": "id2"}
+
+    mock_cursor = AsyncMock()
+    mock_cursor.__aiter__.return_value = [valid_dict, invalid_dict] # <<<---- IMPORTANTE: Iterador retorna lista!
+    mock_limit_chain = MagicMock()
+    mock_limit_chain.limit.return_value = mock_cursor
+    mock_skip_chain = MagicMock()
+    mock_skip_chain.skip.return_value = mock_limit_chain
+    mock_collection = MagicMock()
+    mock_collection.find.return_value = mock_skip_chain
+    mock_logger = mocker.patch("app.db.task_crud.logger")
+
+    validation_error = ValidationError.from_exception_data(title='Task', line_errors=[])
+    def validate_side_effect(data):
+        if "title" in data and data["title"] == valid_task_obj.title: return valid_task_obj
+        else: raise validation_error
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        with patch("app.db.task_crud.Task.model_validate", side_effect=validate_side_effect) as mock_validate:
+            tasks = await task_crud.get_tasks_by_owner(db=MagicMock(), owner_id=owner_id)
+
+    mock_collection.find.assert_called_once()
+    mock_skip_chain.skip.assert_called_once_with(0)
+    mock_limit_chain.limit.assert_called_once_with(100)
+    assert len(tasks) == 1
+    assert tasks[0] == valid_task_obj
+    assert mock_validate.call_count == 2
+    mock_logger.error.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_get_tasks_by_owner_db_exception(mocker):
+    """Testa o tratamento de exceção do DB durante a busca."""
+    mock_collection = MagicMock()
+    owner_id = uuid.uuid4()
+    db_error = Exception("Simulated Find Error")
+    mock_collection.find.side_effect = db_error
+    mock_logger = mocker.patch("app.db.task_crud.logger")
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        tasks = await task_crud.get_tasks_by_owner(db=MagicMock(), owner_id=owner_id)
+
+    assert tasks == []
+    mock_logger.exception.assert_called_once()
+    assert f"DB Error listing tasks for owner {owner_id}" in mock_logger.exception.call_args[0][0]
+
+# --- Testes para update_task ---
+
+@pytest.mark.asyncio
+async def test_update_task_success(valid_task_obj):
+    mock_collection = MagicMock()
+    task_id = valid_task_obj.id
+    owner_id = valid_task_obj.owner_id
+    update_payload = {"title": "Updated Title"}
+
+    # Precisa mockar datetime para controlar updated_at
+    mock_now = datetime.now(timezone.utc)
+    with patch("app.db.task_crud.datetime") as mock_dt:
+        mock_dt.now.return_value = mock_now
+
+        # O dicionário que esperamos que find_one_and_update retorne
+        db_return_dict = valid_task_obj.model_dump(mode='json')
+        db_return_dict.update(update_payload)
+        db_return_dict['updated_at'] = mock_now
+        db_return_dict['_id'] = 'mongo_id' # Adicionar _id que seria retornado
+
+        # O objeto Task que esperamos após a validação
+        expected_task_obj = Task(**db_return_dict)
+
+        mock_collection.find_one_and_update = AsyncMock(return_value=db_return_dict)
+
+        with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+             # Mockar Task.model_validate para retornar o objeto final
+            with patch("app.db.task_crud.Task.model_validate", return_value=expected_task_obj) as mock_validate:
+                result = await task_crud.update_task(MagicMock(), task_id, owner_id, update_payload)
+
+    expected_filter = {"id": str(task_id), "owner_id": str(owner_id)}
+    expected_update = {"$set": {**update_payload, "updated_at": mock_now}}
+    mock_collection.find_one_and_update.assert_awaited_once_with(
+        expected_filter, expected_update, return_document=True
+    )
+    mock_validate.assert_called_once_with(db_return_dict) # Deve ser chamado com o dict retornado pelo db
+    assert result == expected_task_obj
+
+# --- Testes para delete_task ---
+
+@pytest.mark.asyncio
+async def test_delete_task_success():
+    mock_collection = MagicMock()
+    mock_delete_result = MagicMock()
+    mock_delete_result.deleted_count = 1
+    mock_collection.delete_one = AsyncMock(return_value=mock_delete_result)
+    task_id, owner_id = uuid.uuid4(), uuid.uuid4()
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        deleted = await task_crud.delete_task(MagicMock(), task_id, owner_id)
+
+    mock_collection.delete_one.assert_awaited_once_with({"id": str(task_id), "owner_id": str(owner_id)})
+    assert deleted is True
+
+@pytest.mark.asyncio
+async def test_delete_task_not_found():
+    mock_collection = MagicMock()
+    mock_delete_result = MagicMock()
+    mock_delete_result.deleted_count = 0
+    mock_collection.delete_one = AsyncMock(return_value=mock_delete_result)
+    task_id, owner_id = uuid.uuid4(), uuid.uuid4()
+
+    with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
+        deleted = await task_crud.delete_task(MagicMock(), task_id, owner_id)
+
+    mock_collection.delete_one.assert_awaited_once()
+    assert deleted is False
+
+# --- Testes para _parse_sort_params ---
+
+@pytest.mark.parametrize(
+    "sort_by, sort_order, expected", [
+        ("due_date", "asc", [("due_date", ASCENDING)]),
+        ("priority_score", "desc", [("priority_score", DESCENDING)]),
+        ("created_at", "ASC", [("created_at", ASCENDING)]),
+        ("importance", "DESC", [("importance", DESCENDING)]),
+        ("due_date", "ascending", [("due_date", DESCENDING)]),
+        ("due_date", "", [("due_date", DESCENDING)]),
+        ("invalid_field", "desc", None),
+        (None, "desc", None),
+    ]
+)
+def test_parse_sort_params(sort_by, sort_order, expected):
+    from app.db.task_crud import _parse_sort_params
+    assert _parse_sort_params(sort_by, sort_order) == expected
+
+# (Testes para create_task_indexes omitidos por complexidade de mock de create_index)--- Fim de tests/test_db_task_crud.py ---
+
+--- Início de tests/test_main.py (86 linhas) ---
 # tests/test_main.py
 
 from fastapi import FastAPI
@@ -3013,80 +3362,76 @@ async def test_read_root(test_async_client: AsyncClient):
     assert response.status_code == 200
     assert f"Bem-vindo à {settings.PROJECT_NAME}!" in response.json()["message"]
 
-
 async def test_lifespan_db_connection_failure(mocker, caplog):
     """
     Testa o 'lifespan' (manual) quando a conexão inicial falha.
-    Verifica se o erro crítico é logado e se o yield ocorre.
+    Verifica se o log crítico é chamado via logger (Loguru) mockado.
     """
     caplog.set_level(logging.CRITICAL)
 
-    # Mockar as funções chamadas pelo lifespan
+    # Mockar funções do lifespan
     mock_connect = mocker.patch('app.main.connect_to_mongo', return_value=None)
-    # Mockar close_mongo para verificar se é chamado no final (não será neste caso)
     mock_close = mocker.patch('app.main.close_mongo_connection', new_callable=AsyncMock)
-    # Mockar as funções de índice para garantir que não são chamadas
     mock_create_user_idx = mocker.patch('app.main.create_user_indexes', new_callable=AsyncMock)
     mock_create_task_idx = mocker.patch('app.main.create_task_indexes', new_callable=AsyncMock)
 
+    # Mockar o logger do módulo main 
+    mock_logger = mocker.patch('app.main.logger')
 
     # Simular a execução do context manager do lifespan
     async with lifespan(fastapi_app):
-        # O código dentro do 'async with' é executado após o 'yield'
-        # Verifica se o log crítico foi emitido *antes* do yield
-        assert "Falha fatal ao conectar ao MongoDB na inicialização." in caplog.text
-        # Verifica se os índices não foram chamados
-        mock_create_user_idx.assert_not_called()
-        mock_create_task_idx.assert_not_called()
-
-    # Após o 'async with', a parte de shutdown do lifespan executa
+        pass
+        
+     # Verifica chamadas
     mock_connect.assert_awaited_once()
-    # Close não deve ser chamado, pois retornamos cedo
+    mock_create_user_idx.assert_not_called()
+    mock_create_task_idx.assert_not_called()
+    mock_logger.critical.assert_called_once()
+    assert "Falha fatal ao conectar ao MongoDB" in mock_logger.critical.call_args[0][0]
     mock_close.assert_not_called()
-
 
 async def test_lifespan_index_creation_failure(mocker, caplog):
     """
     Testa o 'lifespan' (manual) quando ocorre erro na criação de índices.
-    Verifica se o erro é logado e se a limpeza (close) ainda ocorre.
+    Verifica se o log de erro é chamado via logger (Loguru) mockado.
     """
-    caplog.set_level(logging.ERROR)
     test_exception = Exception("Erro simulado no índice")
     mock_db_instance = AsyncMock()
 
-    # Mockar as funções chamadas pelo lifespan
+    # Mockar funções do lifespan
     mock_connect = mocker.patch('app.main.connect_to_mongo', return_value=mock_db_instance)
     mock_close = mocker.patch('app.main.close_mongo_connection', new_callable=AsyncMock)
-    # Fazer a criação de índice de usuário falhar
     mock_create_user_idx = mocker.patch('app.main.create_user_indexes', side_effect=test_exception)
     mock_create_task_idx = mocker.patch('app.main.create_task_indexes', new_callable=AsyncMock)
 
-    # Mockar o app.state.db para a função de índice 
-    mock_state = MagicMock()
-    mock_state.db = mock_db_instance 
+    # Mockar o logger do módulo main
+    mock_logger = mocker.patch('app.main.logger')
 
-    # Criar o mock do app e atribuir o mock state
+    # Mockar o app e state
+    mock_state = MagicMock()
+    mock_state.db = mock_db_instance
     mock_app = MagicMock(spec=FastAPI)
     mock_app.state = mock_state
 
+    # Simular execução
     try:
         async with lifespan(mock_app):
              pass
     except Exception as e:
          pytest.fail(f"Lifespan levantou uma exceção inesperada: {e}")
 
-    # Verifica chamadas e logs
+    # Verifica chamadas
     mock_connect.assert_awaited_once()
-    # A função mockada de user_indexes foi chamada
     mock_create_user_idx.assert_awaited_once_with(mock_db_instance)
-     # Task indexes não foi chamado devido à exceção anterior
     mock_create_task_idx.assert_not_called()
-    assert "Erro durante a criação de índices" in caplog.text
-    assert str(test_exception) in caplog.text
-    # Verifica que a conexão foi fechada mesmo após o erro nos índices
+    # Verifica se logger.error foi chamado
+    mock_logger.error.assert_called_once()
+    assert "Erro durante a criação de índices" in mock_logger.error.call_args.args[0]
+    # Verifica se exc_info=True foi passado para o log de erro
+    assert mock_logger.error.call_args.kwargs.get('exc_info') is True
     mock_close.assert_awaited_once()--- Fim de tests/test_main.py ---
 
---- Início de tests/test_tasks.py (1048 linhas) ---
+--- Início de tests/test_tasks.py (1064 linhas) ---
 # tests/test_tasks.py
 # ==========================================
 # --- Importações ---
@@ -3100,6 +3445,7 @@ from fastapi import status
 from typing import Dict, List, Any
 import uuid
 import pytest_asyncio
+from pytest_mock import mocker
 from app.core.config import settings
 from app.models.task import TaskStatus
 from datetime import date, timedelta, datetime, timezone
@@ -3924,15 +4270,20 @@ async def test_delete_other_user_task_forbidden(
 
 async def test_access_tasks_invalid_token_format(
     test_async_client: AsyncClient,
-    auth_headers_a: Dict[str, str] 
+    auth_headers_a: Dict[str, str],
+    mocker
 ):
     """Testa acessar /tasks com um token JWT mal formatado."""
     url = f"{settings.API_V1_STR}/tasks/"
     invalid_headers = {"Authorization": "Bearer tokeninvalido.nao.jwt"}
+
+    mock_sec_logger = mocker.patch("app.core.security.logger")
+
     response = await test_async_client.get(url, headers=invalid_headers)
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
-
+    mock_sec_logger.error.assert_called_once()
+    assert "Not enough segments" in mock_sec_logger.error.call_args[0][0]
 
 async def test_access_tasks_token_wrong_secret(
     test_async_client: AsyncClient,
@@ -3954,9 +4305,13 @@ async def test_access_tasks_token_wrong_secret(
         username=username_dummy,
     )
     import jwt as jose_jwt 
-    to_encode = {"sub": str(user_id_dummy), "username": username_dummy, "exp": datetime.now(timezone.utc) + timedelta(minutes=15)}
+    to_encode = {"sub": str(user_id_dummy),
+                "username": username_dummy,
+                "exp": datetime.now(timezone.utc) + timedelta(minutes=15)
+                }
     token_really_wrong_key = jose_jwt.encode(to_encode, wrong_secret, algorithm=settings.JWT_ALGORITHM)
 
+    mock_sec_logger = mocker.patch("app.core.security.logger")
 
     # 3. Tentando acessar a API com este token
     url = f"{settings.API_V1_STR}/tasks/"
@@ -3965,6 +4320,8 @@ async def test_access_tasks_token_wrong_secret(
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
+    mock_sec_logger.error.assert_called_once()
+    assert "Signature verification failed" in mock_sec_logger.error.call_args[0][0]
 
 
 @freeze_time("2025-05-04 18:35:00")
@@ -3993,6 +4350,8 @@ async def test_access_tasks_expired_token(
         algorithm=settings.JWT_ALGORITHM
     )
 
+    mock_sec_logger = mocker.patch("app.core.security.logger")
+
     # 2. Tente acessar a API com o token expirado
     url = f"{settings.API_V1_STR}/tasks/"
     invalid_headers = {"Authorization": f"Bearer {expired_token}"}
@@ -4000,6 +4359,8 @@ async def test_access_tasks_expired_token(
 
     assert response.status_code == status.HTTP_401_UNAUTHORIZED
     assert "validar as credenciais" in response.json()["detail"]
+    mock_sec_logger.error.assert_called_once()
+    assert "Signature has expired" in mock_sec_logger.error.call_args[0][0]
 
 @pytest.mark.parametrize(
     "param_name, injected_value", [
