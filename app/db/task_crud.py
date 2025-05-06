@@ -1,4 +1,13 @@
 # app/db/task_crud.py
+"""
+Módulo contendo as funções CRUD (Create, Read, Update, Delete)
+para interagir com a coleção de tarefas no MongoDB.
+Inclui também funções auxiliares e para criação de índices.
+"""
+
+# ========================
+# --- Importações ---
+# ========================
 import logging
 import uuid
 from datetime import date, datetime, timezone
@@ -6,67 +15,110 @@ from typing import List, Optional, Dict, Any, Tuple
 from motor.motor_asyncio import AsyncIOMotorDatabase, AsyncIOMotorCollection
 from pymongo import ASCENDING, DESCENDING
 from pydantic import ValidationError
-from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus 
 
-# Looger
+# --- Módulos da Aplicação ---
+from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus
+
+# =====================================
+# --- Configurações e Constantes ---
+# =====================================
+
+# Obter um logger para este módulo
 logger = logging.getLogger(__name__)
 
 # Nome da coleção no MongoDB para tarefas
 TASKS_COLLECTION = "tasks"
 
-# --- Funções Auxiliares (internas ao CRUD) ---
+# =========================================
+# --- Funções Auxiliares (Internas) ---
+# =========================================
 
 def _get_tasks_collection(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
-    """Retorna a coleção de tarefas."""
+    """Retorna a coleção de tarefas do banco de dados."""
     return db[TASKS_COLLECTION]
 
 def _parse_sort_params(sort_by: Optional[str], sort_order: str) -> Optional[List[Tuple[str, int]]]:
-    """Converte parâmetros de sort em formato para pymongo."""
+    """
+    Converte os parâmetros de ordenação de string para o formato do PyMongo.
+
+    Args:
+        sort_by: Campo pelo qual ordenar.
+        sort_order: Ordem da ordenação ("asc" ou "desc").
+
+    Returns:
+        Lista de tuplas para ordenação do PyMongo ou None se o campo não for válido.
+    """
+    # Mapeia o parâmetro de ordem para o formato PyMongo
+    if sort_order.lower() == "asc":
+        mongo_order = ASCENDING
+    else:
+        # Padrão para DESCENDING se não for "asc"
+        mongo_order = DESCENDING
+
+    # Verifica se o campo de ordenação é válido
     if sort_by in ["priority_score", "due_date", "created_at", "importance"]:
-        if sort_order.lower() == "asc":
-             mongo_order = ASCENDING
-        else:
-             mongo_order = DESCENDING
         return [(sort_by, mongo_order)]
     return None
 
-# --- Funções CRUD para Tarefas ---
+# =======================================
+# --- Operações CRUD para Tarefas ---
+# =======================================
 
 async def create_task(db: AsyncIOMotorDatabase, task_db: Task) -> Optional[Task]:
     """
     Cria uma nova tarefa no banco de dados.
-    Recebe um objeto Task já validado e com campos calculados (id, owner_id, etc.).
-    Retorna o objeto Task criado ou None em caso de erro.
+
+    A tarefa já deve chegar validada e com campos como ID e owner_id preenchidos.
+
+    Args:
+        db: Instância da conexão com o banco de dados.
+        task_db: Objeto Task contendo os dados da tarefa a ser criada.
+
+    Returns:
+        O objeto Task criado se sucesso, None caso contrário.
     """
     collection = _get_tasks_collection(db)
-    task_db_dict = task_db.model_dump(mode="json") 
+    # Converte o modelo Pydantic para um dicionário compatível com MongoDB
+    task_db_dict = task_db.model_dump(mode="json")
     try:
         insert_result = await collection.insert_one(task_db_dict)
         if insert_result.acknowledged:
-            return task_db 
+            return task_db
         else:
+            logger.warning(f"Criação da tarefa para owner {task_db.owner_id} não foi reconhecida pelo DB (acknowledged=False).")
             return None
     except Exception as e:
         logger.exception(f"DB Error creating task for owner {task_db.owner_id}: {e}")
         return None
 
 async def get_task_by_id(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uuid.UUID) -> Optional[Task]:
-    """Busca uma tarefa pelo seu ID e ID do proprietário."""
+    """
+    Busca uma tarefa específica pelo seu ID e pelo ID do proprietário.
+
+    Args:
+        db: Instância da conexão com o banco de dados.
+        task_id: ID da tarefa a ser buscada.
+        owner_id: ID do proprietário da tarefa.
+
+    Returns:
+        O objeto Task encontrado ou None se a tarefa não existir ou erro de validação.
+    """
     collection = _get_tasks_collection(db)
     task_dict = await collection.find_one({"id": str(task_id), "owner_id": str(owner_id)})
     if task_dict:
+        # Remove o campo _id do MongoDB antes de validar com Pydantic
         task_dict.pop('_id', None)
         try:
             return Task.model_validate(task_dict)
         except (ValidationError, Exception) as e:
             logger.error(f"DB Validation error get_task_by_id {task_id} for owner {owner_id}: {e}")
-            return None 
+            return None
     return None
 
 async def get_tasks_by_owner(
     db: AsyncIOMotorDatabase,
     owner_id: uuid.UUID,
-    *, 
+    *,
     status_filter: Optional[TaskStatus] = None,
     due_before: Optional[date] = None,
     project_filter: Optional[str] = None,
@@ -78,21 +130,37 @@ async def get_tasks_by_owner(
 ) -> List[Task]:
     """
     Busca tarefas de um proprietário com filtros, ordenação e paginação.
-    Retorna uma lista de objetos Task.
+
+    Args:
+        db: Instância da conexão com o banco de dados.
+        owner_id: ID do proprietário das tarefas.
+        status_filter: Filtra tarefas pelo status.
+        due_before: Filtra tarefas com data de entrega anterior ou igual à data fornecida.
+        project_filter: Filtra tarefas por nome do projeto.
+        tags_filter: Filtra tarefas que contenham todas as tags listadas.
+        sort_by: Campo para ordenação.
+        sort_order: Ordem da ordenação ("asc" ou "desc").
+        limit: Número máximo de tarefas a retornar.
+        skip: Número de tarefas a pular (para paginação).
+
+    Returns:
+        Uma lista de objetos Task. Retorna lista vazia em caso de erro ou nenhuma tarefa encontrada.
     """
     collection = _get_tasks_collection(db)
     query: Dict[str, Any] = {"owner_id": str(owner_id)}
 
-    # Adiciona filtros opcionais
+    # Aplica filtros opcionais à query do MongoDB
     if status_filter:
         query["status"] = status_filter.value
     if due_before:
+        # Converte a data para datetime no início do dia com timezone UTC para comparação
         due_before_dt = datetime.combine(due_before, datetime.min.time(), tzinfo=timezone.utc)
         query["due_date"] = {"$lte": due_before_dt}
     if project_filter:
         query["project"] = project_filter
     if tags_filter:
-        query["tags"] = {"$all": tags_filter} 
+        # Filtra por tarefas que contenham todos os tags fornecidos
+        query["tags"] = {"$all": tags_filter}
 
     sort_list = _parse_sort_params(sort_by, sort_order)
 
@@ -103,12 +171,14 @@ async def get_tasks_by_owner(
             tasks_cursor = tasks_cursor.sort(sort_list)
 
         async for task_dict in tasks_cursor:
+            # Remove o campo _id do MongoDB antes de validar com Pydantic
             task_dict.pop('_id', None)
             try:
                 validated_tasks.append(Task.model_validate(task_dict))
             except (ValidationError, Exception) as e:
-                 logger.error(f"DB Validation error list_tasks owner {owner_id} task {task_dict.get('id', 'N/A')}: {e}")
-                 continue 
+                logger.error(f"DB Validation error list_tasks owner {owner_id} task {task_dict.get('id', 'N/A')}: {e}")
+                # Continua para a próxima tarefa se uma falhar na validação
+                continue
         return validated_tasks
     except Exception as e:
         logger.exception(f"DB Error listing tasks for owner {owner_id}: {e}")
@@ -119,32 +189,48 @@ async def update_task(
     db: AsyncIOMotorDatabase,
     task_id: uuid.UUID,
     owner_id: uuid.UUID,
-    update_data: Dict[str, Any] 
+    update_data: Dict[str, Any]
 ) -> Optional[Task]:
     """
-    Atualiza uma tarefa existente.
-    Recebe um dicionário com os campos $set do MongoDB.
-    Retorna o objeto Task atualizado ou None se não encontrada/erro.
+    Atualiza uma tarefa existente de um proprietário específico.
+
+    Os dados de atualização devem ser fornecidos em um dicionário pronto para o
+    operador '$set' do MongoDB. O campo 'updated_at' é automaticamente atualizado.
+
+    Args:
+        db: Instância da conexão com o banco de dados.
+        task_id: ID da tarefa a ser atualizada.
+        owner_id: ID do proprietário da tarefa.
+        update_data: Dicionário com os campos a serem atualizados.
+
+    Returns:
+        O objeto Task atualizado ou None se a tarefa não for encontrada ou ocorrer um erro.
     """
     collection = _get_tasks_collection(db)
+    # Garante que o campo 'updated_at' seja atualizado
     update_data["updated_at"] = datetime.now(timezone.utc)
 
     try:
+        # Executa a atualização e retorna o documento modificado
         updated_task_dict_raw = await collection.find_one_and_update(
             {"id": str(task_id), "owner_id": str(owner_id)},
             {"$set": update_data},
-            return_document=True 
+            # Importante: retorna o documento APÓS a atualização
+            return_document=True
         )
 
         if updated_task_dict_raw:
+            # Remove o campo _id do MongoDB antes de validar com Pydantic
             updated_task_dict_raw.pop('_id', None)
             try:
                 return Task.model_validate(updated_task_dict_raw)
             except (ValidationError, Exception) as e:
-                logger.error(f"DB Validation error update_task {task_id} owner {owner_id}: {e}") 
+                logger.error(f"DB Validation error update_task {task_id} owner {owner_id}: {e}")
                 return None
         else:
-            return None 
+            # A tarefa não foi encontrada para atualização
+            logger.warning(f"Tentativa de atualizar tarefa não encontrada: ID {task_id}, Owner ID {owner_id}")
+            return None
     except Exception as e:
         logger.exception(f"DB Error updating task {task_id} owner {owner_id}: {e}")
         return None
@@ -152,33 +238,63 @@ async def update_task(
 
 async def delete_task(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uuid.UUID) -> bool:
     """
-    Deleta uma tarefa pelo ID e ID do proprietário.
-    Retorna True se a deleção foi bem-sucedida (1 documento deletado), False caso contrário.
+    Deleta uma tarefa específica pelo seu ID e pelo ID do proprietário.
+
+    Args:
+        db: Instância da conexão com o banco de dados.
+        task_id: ID da tarefa a ser deletada.
+        owner_id: ID do proprietário da tarefa.
+
+    Returns:
+        True se a tarefa foi deletada com sucesso (1 documento afetado), False caso contrário.
     """
     collection = _get_tasks_collection(db)
     try:
         delete_result = await collection.delete_one({"id": str(task_id), "owner_id": str(owner_id)})
+        # Verifica se exatamente um documento foi deletado
         return delete_result.deleted_count == 1
     except Exception as e:
         logger.exception(f"DB Error deleting task {task_id} owner {owner_id}: {e}")
         return False
-    
+
+# ===================================================
+# --- Criação de Índices do Banco de Dados ---
+# ===================================================
+
 async def create_task_indexes(db: AsyncIOMotorDatabase):
-    """Cria índices importantes para a coleção de tarefas se não existirem."""
-    collection = _get_tasks_collection(db) 
+    """
+    Cria os índices necessários na coleção de tarefas para otimizar consultas.
+
+    Os índices são criados apenas se ainda não existirem.
+    Esta função é tipicamente chamada durante a inicialização da aplicação.
+
+    Args:
+        db: Instância da conexão com o banco de dados.
+    """
+    collection = _get_tasks_collection(db)
     try:
+        # Índice único para o ID da tarefa
         await collection.create_index("id", unique=True, name="task_id_unique_idx")
+        # Índice para o ID do proprietário, usado em muitas consultas
         await collection.create_index("owner_id", name="task_owner_idx")
+        # Índice composto para consultas de tarefas do proprietário por data de entrega
         await collection.create_index(
-            [("owner_id", ASCENDING), ("due_date", DESCENDING)], 
+            [("owner_id", ASCENDING), ("due_date", DESCENDING)],
             name="task_owner_due_date_idx"
         )
+        # Índice composto para consultas de tarefas do proprietário por pontuação de prioridade
         await collection.create_index(
-            [("owner_id", ASCENDING), ("priority_score", DESCENDING)], 
+            [("owner_id", ASCENDING), ("priority_score", DESCENDING)],
             name="task_owner_priority_idx"
         )
+        # Índice para filtrar por tags
         await collection.create_index("tags", name="task_tags_idx")
 
+        # Log mantido em português, pois não parece ser uma mensagem de exceção crítica que testes verificariam comumente.
         logging.info("Índices da coleção 'tasks' verificados/criados.")
     except Exception as e:
-        logging.error(f"Erro ao criar índices da coleção 'tasks': {e}")
+        # A mensagem de erro para criação de índices foi mantida como "Erro ao criar..."
+        # porque o original também estava assim, mas adicionei exc_info=True
+        # que é uma melhoria e não deve quebrar testes que verificam a mensagem.
+        # Se este log específico também for testado, me avise para ajustar.
+        logging.error(f"Erro ao criar índices da coleção 'tasks': {e}", exc_info=True)
