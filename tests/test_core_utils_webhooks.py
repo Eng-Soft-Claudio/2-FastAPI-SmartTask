@@ -1,148 +1,323 @@
 # tests/test_core_utils_webhooks.py
+"""
+Este módulo contém testes unitários para a função `send_webhook_notification`
+localizada em `app.core.utils`.
 
-import pytest
-import logging
-import httpx
-import respx 
-import hmac
+Os testes utilizam `respx` para mockar as requisições HTTP externas,
+permitindo testar o comportamento da função sob diversas condições:
+- Envio de webhook sem segredo (sem header de assinatura).
+- Envio de webhook com segredo (com verificação da assinatura HMAC-SHA256).
+- Tratamento de erros HTTP retornados pelo servidor do webhook (ex: 4xx, 5xx).
+- Tratamento de erros de rede/conexão durante a tentativa de envio.
+- Comportamento quando a URL do webhook não está configurada nas settings.
+"""
+
+# ========================
+# --- Importações ---
+# ========================
 import hashlib
+import hmac
 import json
-from unittest.mock import AsyncMock, patch # Usaremos patch do unittest
+from unittest.mock import AsyncMock, patch 
 
-from app.core.utils import send_webhook_notification
+import httpx 
+import pytest
+import respx 
+
+# --- Módulos da Aplicação ---
 from app.core.config import settings
+from app.core.utils import send_webhook_notification
 
+# ====================================
+# --- Marcador Global de Teste ---
+# ====================================
 pytestmark = pytest.mark.asyncio
 
-# Dados de teste para a tarefa
-test_task_data = {
+# =====================================
+# --- Constantes e Dados de Teste ---
+# =====================================
+
+# Dados de teste para a tarefa que será enviada no payload do webhook.
+TEST_TASK_DATA_FOR_WEBHOOK = {
     "id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
     "owner_id": "a1b2c3d4-e5f6-7890-1234-567890abcdef",
-    "title": "Webhook Test Task",
+    "title": "Tarefa de Teste para Webhook",
     "importance": 4,
-    "status": "pendente",
+    "status": "pendente_webhook_test",
 }
-test_event_type = "task.test_event"
-test_webhook_url = "http://test-webhook.site/hook" 
+TEST_EVENT_TYPE_WEBHOOK = "task.webhook_test_event"
+# URL mockada para os webhooks; `respx` interceptará chamadas para esta URL.
+TEST_WEBHOOK_TARGET_URL = "http://mocked-webhook-receiver.test/api/hook"
 
-@pytest.fixture(autouse=True)
-def override_settings_for_webhook(monkeypatch):
-    """Sobrescreve configurações de webhook APENAS para estes testes."""
-    monkeypatch.setattr(settings, 'WEBHOOK_URL', test_webhook_url)
+# =================================
+# --- Fixtures de Teste ---
+# =================================
+
+@pytest.fixture(autouse=True) # Aplicado automaticamente a todos os testes neste arquivo.
+def override_webhook_settings_for_tests(monkeypatch):
+    """
+    Fixture `autouse` que sobrescreve as configurações globais de webhook
+    (`settings.WEBHOOK_URL` e `settings.WEBHOOK_SECRET`) para cada teste neste módulo.
+    Isso garante um estado limpo e controlado para as configurações de webhook,
+    prevenindo que valores de um teste afetem outro ou que o sistema dependa
+    de variáveis de ambiente reais durante os testes.
+
+    - Define `WEBHOOK_URL` para uma URL de teste padrão.
+    - Inicialmente define `WEBHOOK_SECRET` como `None` (pode ser alterado por testes específicos).
+    """
+    print("  Fixture (autouse): Configurando settings de webhook para testes...")
+    monkeypatch.setattr(settings, 'WEBHOOK_URL', TEST_WEBHOOK_TARGET_URL)
+    # WEBHOOK_SECRET é None por padrão; testes que precisam dele o definirão.
     monkeypatch.setattr(settings, 'WEBHOOK_SECRET', None)
+    print(f"    settings.WEBHOOK_URL mockado para: {TEST_WEBHOOK_TARGET_URL}")
+    print(f"    settings.WEBHOOK_SECRET mockado para: None (inicialmente)")
 
-# Usar respx para mockar as chamadas httpx
-@respx.mock
-async def test_send_webhook_no_secret(override_settings_for_webhook):
-    """Testa o envio de webhook quando não há segredo configurado."""
-    respx.post(test_webhook_url).mock(return_value=httpx.Response(200, json={"status": "ok"}))
+# ===========================================================
+# --- Testes da Função `send_webhook_notification` ---
+# ===========================================================
 
+@respx.mock # Ativa o mock de `respx` para este teste.
+async def test_send_webhook_successfully_without_secret(
+    # `override_webhook_settings_for_tests` já foi aplicada (autouse).
+):
+    """
+    Testa o envio bem-sucedido de uma notificação de webhook quando
+    `settings.WEBHOOK_SECRET` NÃO está configurado.
+
+    Verifica:
+    - Se uma requisição POST HTTP é feita para a `WEBHOOK_URL` configurada.
+    - Se o payload JSON enviado contém os dados corretos (evento, dados da tarefa, timestamp).
+    - Se o header de assinatura `X-SmartTask-Signature` NÃO está presente na requisição.
+    """
+    print("\nTeste: send_webhook_notification - Envio bem-sucedido sem segredo.")
+    # Arrange: Mockar a rota HTTP para retornar uma resposta de sucesso (200 OK).
+    # `respx` interceptará a chamada para TEST_WEBHOOK_TARGET_URL.
+    mocked_route = respx.post(TEST_WEBHOOK_TARGET_URL).mock(
+        return_value=httpx.Response(200, json={"status": "webhook_received_ok"})
+    )
+    print(f"  Mock respx: Rota POST para '{TEST_WEBHOOK_TARGET_URL}' mockada para retornar 200.")
+
+    # Act: Chamar a função de envio de webhook.
+    print("  Atuando: Chamando send_webhook_notification...")
     await send_webhook_notification(
-        event_type=test_event_type,
-        task_data=test_task_data
+        event_type=TEST_EVENT_TYPE_WEBHOOK,
+        task_data=TEST_TASK_DATA_FOR_WEBHOOK
     )
 
-    # Verifica se a chamada HTTP foi feita para a URL correta
-    assert respx.calls.call_count == 1
-    request = respx.calls.last.request
-    assert str(request.url) == test_webhook_url
+    # Assert: Verificar a chamada HTTP e seus detalhes.
+    assert mocked_route.called, "A rota do webhook mockada não foi chamada."
+    assert respx.calls.call_count == 1, "Número de chamadas HTTP incorreto."
+    
+    last_request_made = respx.calls.last.request
+    print(f"  Requisição enviada: URL='{last_request_made.url}', Headers='{last_request_made.headers}'")
+    assert str(last_request_made.url) == TEST_WEBHOOK_TARGET_URL, "URL da requisição incorreta."
 
-    # Verifica o payload JSON
-    payload = json.loads(request.content)
-    assert payload["event"] == test_event_type
-    assert payload["task"] == test_task_data
-    assert "timestamp" in payload
+    # Verificar o payload JSON enviado.
+    sent_payload = json.loads(last_request_made.content)
+    print(f"  Payload enviado: {sent_payload}")
+    assert sent_payload.get("event") == TEST_EVENT_TYPE_WEBHOOK, "Campo 'event' no payload incorreto."
+    assert sent_payload.get("task") == TEST_TASK_DATA_FOR_WEBHOOK, "Campo 'task' no payload incorreto."
+    assert "timestamp" in sent_payload, "Campo 'timestamp' ausente no payload."
 
-    # Verifica que o header de assinatura NÃO foi enviado
-    assert "X-SmartTask-Signature" not in request.headers
+    # Verificar a ausência do header de assinatura.
+    assert "X-SmartTask-Signature" not in last_request_made.headers, \
+        "Header 'X-SmartTask-Signature' presente indevidamente (deveria estar ausente sem segredo)."
+    print("  Sucesso: Webhook enviado corretamente sem header de assinatura.")
 
-# Usar respx e monkeypatch para setar o segredo
 @respx.mock
-async def test_send_webhook_with_secret(monkeypatch):
-    """Testa o envio de webhook com um segredo e verifica a assinatura HMAC."""
-    test_secret = "my-super-secret-webhook-key"
-    monkeypatch.setattr(settings, 'WEBHOOK_SECRET', test_secret) 
-    monkeypatch.setattr(settings, 'WEBHOOK_URL', test_webhook_url) 
+async def test_send_webhook_successfully_with_secret_and_valid_signature(
+    monkeypatch
+    # Para modificar settings.WEBHOOK_SECRET especificamente para este teste.
+):
+    """
+    Testa o envio bem-sucedido de uma notificação de webhook quando
+    `settings.WEBHOOK_SECRET` ESTÁ configurado.
 
-    # Mocka a rota httpx
-    route = respx.post(test_webhook_url).mock(return_value=httpx.Response(200))
+    Verifica:
+    - Se a requisição POST HTTP é feita.
+    - Se o header de assinatura `X-SmartTask-Signature` ESTÁ presente.
+    - Se a assinatura HMAC-SHA256 no header corresponde à assinatura calculada
+      do payload enviado, usando o segredo configurado.
+    """
+    print("\nTeste: send_webhook_notification - Envio bem-sucedido com segredo e assinatura válida.")
+    # Arrange: Definir um segredo para o webhook e mockar a rota HTTP.
+    test_webhook_secret_key = "este-e-um-segredo-muito-secreto-para-hmac"
+    monkeypatch.setattr(settings, 'WEBHOOK_SECRET', test_webhook_secret_key)
+    # WEBHOOK_URL já está setada pela fixture autouse.
+    print(f"  Mock monkeypatch: settings.WEBHOOK_SECRET definido para '{test_webhook_secret_key}'.")
 
+    mocked_route = respx.post(TEST_WEBHOOK_TARGET_URL).mock(return_value=httpx.Response(200))
+    print(f"  Mock respx: Rota POST para '{TEST_WEBHOOK_TARGET_URL}' mockada.")
+
+    # Act: Chamar a função de envio.
+    print("  Atuando: Chamando send_webhook_notification...")
     await send_webhook_notification(
-        event_type=test_event_type,
-        task_data=test_task_data
+        event_type=TEST_EVENT_TYPE_WEBHOOK,
+        task_data=TEST_TASK_DATA_FOR_WEBHOOK
     )
 
-    # Verifica a chamada HTTP
-    assert route.called
-    request = respx.calls.last.request
+    # Assert: Verificar a chamada HTTP e a assinatura.
+    assert mocked_route.called, "Rota do webhook não foi chamada."
+    last_request_made = respx.calls.last.request
 
-    # Verifica que o header de assinatura FOI enviado
-    assert "X-SmartTask-Signature" in request.headers
-    signature_header = request.headers["X-SmartTask-Signature"]
-    assert signature_header.startswith("sha256=")
+    # Verificar presença do header de assinatura.
+    assert "X-SmartTask-Signature" in last_request_made.headers, "Header 'X-SmartTask-Signature' ausente."
+    
+    signature_from_header = last_request_made.headers["X-SmartTask-Signature"]
+    assert signature_from_header.startswith("sha256="), "Formato do header de assinatura inválido."
+    print(f"  Header de assinatura recebido: {signature_from_header}")
 
-    # Verifica se a assinatura está correta
-    # Recria o payload exato e calcula a assinatura esperada
-    payload_dict = {
-        "event": test_event_type,
-        "task": test_task_data,
+    # Verificar se a assinatura está correta.
+    # Para isso, precisamos recriar o payload *exatamente como foi enviado*
+    # (incluindo o timestamp que foi gerado pela função `send_webhook_notification`).
+    
+    # 1. Obter o payload que foi realmente enviado na requisição mockada.
+    sent_payload_bytes = last_request_made.content
+    sent_payload_dict_actual = json.loads(sent_payload_bytes)
+    actual_timestamp_sent = sent_payload_dict_actual["timestamp"] # Extrai o timestamp real.
+
+    # 2. Construir o payload base esperado (sem o timestamp, que é dinâmico).
+    expected_payload_base = {
+        "event": TEST_EVENT_TYPE_WEBHOOK,
+        "task": TEST_TASK_DATA_FOR_WEBHOOK,
     }
-    sent_payload_bytes = request.content 
-    sent_payload_dict = json.loads(sent_payload_bytes) 
-    # Agora pega o timestamp que foi realmente enviado
-    payload_dict["timestamp"] = sent_payload_dict["timestamp"]
+    # 3. Adicionar o timestamp real enviado ao nosso payload esperado para cálculo.
+    payload_for_signature_calculation = expected_payload_base.copy()
+    payload_for_signature_calculation["timestamp"] = actual_timestamp_sent
 
-    # Gera o payload JSON ordenado e encodado como a função faz
-    expected_payload_bytes = json.dumps(payload_dict, separators=(',', ':'), sort_keys=True).encode('utf-8')
-    secret_bytes = test_secret.encode('utf-8')
-    expected_signature = hmac.new(secret_bytes, expected_payload_bytes, hashlib.sha256).hexdigest()
+    # 4. Gerar a representação JSON ordenada e encodada (como a função de webhook faz internamente).
+    #    É crucial que a serialização (ordem das chaves, espaçamento) seja idêntica.
+    payload_bytes_for_hmac = json.dumps(
+        payload_for_signature_calculation,
+        separators=(',', ':'), # Compacta o JSON, sem espaços extras.
+        sort_keys=True        # Ordena as chaves alfabeticamente.
+    ).encode('utf-8')
+    
+    secret_bytes_for_hmac = test_webhook_secret_key.encode('utf-8')
+    
+    # 5. Calcular a assinatura HMAC-SHA256 esperada.
+    expected_hmac_signature_hex = hmac.new(
+        secret_bytes_for_hmac,
+        payload_bytes_for_hmac,
+        hashlib.sha256
+    ).hexdigest()
+    print(f"  Assinatura HMAC calculada esperada: {expected_hmac_signature_hex}")
 
-    # Compara a assinatura esperada com a que está no header
-    assert signature_header == f"sha256={expected_signature}"
-
-
-@respx.mock
-async def test_send_webhook_http_error(override_settings_for_webhook, mocker):
-    """Testa o tratamento de erro HTTP (ex: 404, 500) do servidor do webhook."""
-    respx.post(test_webhook_url).mock(return_value=httpx.Response(500, text="Internal Server Error"))
-
-    mock_logger = mocker.patch("app.core.utils.logger")
-
-    await send_webhook_notification(test_event_type, test_task_data)
-
-    mock_logger.error.assert_called_once()
-    call_args, _ = mock_logger.error.call_args 
-    assert "Erro no servidor do webhook" in call_args[0]
-    assert "Status: 500" in call_args[0]
-    assert "Internal Server Error" in call_args[0]
+    # 6. Comparar com a assinatura do header.
+    assert signature_from_header == f"sha256={expected_hmac_signature_hex}", "Assinatura HMAC no header não corresponde à esperada."
+    print("  Sucesso: Webhook enviado com segredo e assinatura HMAC válida.")
 
 @respx.mock
-async def test_send_webhook_request_error(override_settings_for_webhook, mocker):
-    """Testa o tratamento de erro de rede/conexão ao enviar webhook."""
-    respx.post(test_webhook_url).mock(side_effect=httpx.RequestError("Connection failed"))
+async def test_send_webhook_handles_http_error_from_server(
+    # `override_webhook_settings_for_tests` já aplicada.
+    mocker # Para mockar o logger.
+):
+    """
+    Testa o tratamento de erro quando o servidor do webhook retorna um erro HTTP
+    (ex: status code 404 Not Found, 500 Internal Server Error).
 
-    mock_logger = mocker.patch("app.core.utils.logger")
+    Verifica se um erro é logado pela função `send_webhook_notification`.
+    """
+    print("\nTeste: send_webhook_notification - Tratamento de erro HTTP do servidor.")
+    # Arrange: Mockar a rota HTTP para retornar um erro 500.
+    http_error_status_code = 500
+    http_error_response_text = "Ocorreu um Erro Interno no Servidor do Webhook"
+    respx.post(TEST_WEBHOOK_TARGET_URL).mock(
+        return_value=httpx.Response(http_error_status_code, text=http_error_response_text)
+    )
+    print(f"  Mock respx: Rota POST para '{TEST_WEBHOOK_TARGET_URL}' mockada para retornar {http_error_status_code}.")
 
-    await send_webhook_notification(test_event_type, test_task_data)
+    # Mockar o logger de `app.core.utils` para verificar se `logger.error` é chamado.
+    mock_utils_logger = mocker.patch("app.core.utils.logger")
+    print("  Mock: app.core.utils.logger.")
 
-    mock_logger.error.assert_called_once()
-    call_args, _ = mock_logger.error.call_args
-    assert "Erro na requisição ao enviar webhook" in call_args[0]
-    assert "Connection failed" in call_args[0]
+    # Act: Chamar a função.
+    print("  Atuando: Chamando send_webhook_notification (esperando erro HTTP)...")
+    await send_webhook_notification(TEST_EVENT_TYPE_WEBHOOK, TEST_TASK_DATA_FOR_WEBHOOK)
 
-async def test_send_webhook_url_not_configured(mocker):
-    """Testa que nada acontece se WEBHOOK_URL não estiver configurada."""
-    with patch('app.core.utils.settings.WEBHOOK_URL', None):
-         # Mock para garantir que httpx não seja instanciado ou chamado
-        mock_post = mocker.patch("httpx.AsyncClient.post", new_callable=AsyncMock)
-        # Mock do logger para garantir que nenhuma tentativa de envio foi logada (exceto o debug)
-        mock_logger = mocker.patch("app.core.utils.logger")
+    # Assert: Verificar se o logger.error foi chamado com a mensagem apropriada.
+    mock_utils_logger.error.assert_called_once()
+    # Extrai os argumentos da chamada ao logger.error.
+    error_log_args, _ = mock_utils_logger.error.call_args
+    error_log_message = error_log_args[0] 
+    print(f"  Log de erro capturado: {error_log_message}")
+    
+    assert "Erro no servidor do webhook" in error_log_message, "Log não indica erro no servidor do webhook."
+    assert f"({TEST_WEBHOOK_TARGET_URL})" in error_log_message, "URL (entre parênteses) não encontrada na mensagem de erro."
+    assert f"Status: {http_error_status_code}" in error_log_message, "Status code do erro não encontrado na mensagem."
+    assert http_error_response_text in error_log_message, "Texto da resposta do erro não encontrado na mensagem."
+    print("  Sucesso: Erro HTTP do servidor tratado e logado corretamente.")
 
-        await send_webhook_notification(test_event_type, test_task_data)
+@respx.mock
+async def test_send_webhook_handles_network_request_error(
+    # `override_webhook_settings_for_tests` já aplicada.
+    mocker
+):
+    """
+    Testa o tratamento de erro quando ocorre um problema de rede ou conexão
+    ao tentar enviar a notificação de webhook (ex: `httpx.RequestError`).
 
-        mock_post.assert_not_called()
-        assert not mock_logger.info.called
-        assert not mock_logger.error.called
-        mock_logger.debug.assert_called_once_with(
-             "Webhook URL não configurada, pulando envio."
-        )
+    Verifica se um erro é logado.
+    """
+    print("\nTeste: send_webhook_notification - Tratamento de erro de rede/conexão.")
+    # Arrange: Mockar a rota HTTP para levantar uma exceção de rede.
+    simulated_network_error_message = "Falha de conexão simulada (DNS lookup failed)"
+    respx.post(TEST_WEBHOOK_TARGET_URL).mock(side_effect=httpx.RequestError(simulated_network_error_message))
+    print(f"  Mock respx: Rota POST para '{TEST_WEBHOOK_TARGET_URL}' mockada para levantar httpx.RequestError.")
+    
+    mock_utils_logger = mocker.patch("app.core.utils.logger")
+    print("  Mock: app.core.utils.logger.")
+
+    # Act: Chamar a função.
+    print("  Atuando: Chamando send_webhook_notification (esperando erro de rede)...")
+    await send_webhook_notification(TEST_EVENT_TYPE_WEBHOOK, TEST_TASK_DATA_FOR_WEBHOOK)
+
+    # Assert: Verificar se logger.error foi chamado.
+    mock_utils_logger.error.assert_called_once()
+    error_log_args, _ = mock_utils_logger.error.call_args
+    error_log_message = error_log_args[0]
+    print(f"  Log de erro capturado: {error_log_message}")
+
+    assert "Erro na requisição ao enviar webhook para" in error_log_message, "Parte inicial da mensagem de erro de rede não encontrada."
+    assert TEST_WEBHOOK_TARGET_URL in error_log_message, "URL não encontrada na mensagem de erro de rede."
+    assert simulated_network_error_message in error_log_message, "Mensagem da exceção de rede não encontrada no log."
+    print("  Sucesso: Erro de rede/conexão tratado e logado corretamente.")
+
+async def test_send_webhook_does_nothing_if_url_not_configured(mocker):
+    """
+    Testa se `send_webhook_notification` não realiza nenhuma ação (nem tenta enviar)
+    e loga uma mensagem de debug se `settings.WEBHOOK_URL` não estiver configurada (for None).
+
+    Verifica:
+    - Se `httpx.AsyncClient.post` (ou qualquer chamada HTTP) NÃO é feito.
+    - Se nenhum log de info ou erro é gerado (além de um possível debug).
+    - Se um log de debug específico é gerado indicando que o envio foi pulado.
+    """
+    print("\nTeste: send_webhook_notification - WEBHOOK_URL não configurada.")
+    # Arrange: Garantir que WEBHOOK_URL é None.
+    # A fixture `override_webhook_settings_for_tests` já define WEBHOOK_URL,
+    # então precisamos sobrescrevê-la novamente para None aqui.
+    with patch('app.core.utils.settings.WEBHOOK_URL', None): 
+        print(f"  Mock patch: settings.WEBHOOK_URL definido como None para este teste.")
+        # Mock para garantir que nenhuma chamada HTTP real seja feita.
+        # Mockamos o método `post` da classe `AsyncClient` no módulo `httpx`.
+        mock_httpx_client_post = mocker.patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+        
+        # Mockar o logger de `app.core.utils` para verificar suas chamadas.
+        mock_utils_logger = mocker.patch("app.core.utils.logger")
+        print("  Mock: httpx.AsyncClient.post e app.core.utils.logger.")
+
+        # Act: Chamar a função.
+        print("  Atuando: Chamando send_webhook_notification...")
+        await send_webhook_notification(TEST_EVENT_TYPE_WEBHOOK, TEST_TASK_DATA_FOR_WEBHOOK)
+
+        # Assert:
+        mock_httpx_client_post.assert_not_called(), "httpx.AsyncClient.post foi chamado indevidamente."
+        # Verifica se não houve logs de info ou error (o que indicaria uma tentativa de envio ou falha).
+        assert not mock_utils_logger.info.called, "logger.info foi chamado indevidamente."
+        assert not mock_utils_logger.error.called, "logger.error foi chamado indevidamente."
+        
+        # Verifica se a mensagem de debug esperada foi logada.
+        expected_debug_message = "Webhook URL não configurada, pulando envio."
+        mock_utils_logger.debug.assert_called_once_with(expected_debug_message)
+        print("  Sucesso: Nenhuma tentativa de envio de webhook e log de debug correto quando URL não configurada.")

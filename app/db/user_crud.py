@@ -36,6 +36,7 @@ USERS_COLLECTION = "users"
 
 def _get_users_collection(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
     """Retorna a coleção de usuários do banco de dados."""
+def _get_users_collection(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
     return db[USERS_COLLECTION]
 
 # =======================================
