@@ -1207,6 +1207,64 @@ async def test_update_user_main_path_raises_duplicate_key_error(mocker, mock_db_
     assert f"DB Error: Attempt to update user {test_user_id}" in log_call_args[0]
     assert "'email': 'duplicate@test.com'" in log_call_args[0]
 
+async def test_update_user_empty_payload_find_one_and_update_returns_none(mocker): # type: ignore
+    """
+    Testa se update_user retorna None quando payload está vazio,
+    usuário existe, mas find_one_and_update (para updated_at) retorna None.
+    """
+    # ========================
+    # --- Arrange ---
+    # ========================
+    test_user_id = uuid.uuid4()
+    fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
+    empty_update_payload = UserUpdate(password=None)
+
+    existing_user_mock = MagicMock(spec=UserInDB)
+    existing_user_mock.id = test_user_id
+
+    mock_pwd_hash = mocker.patch("app.db.user_crud.get_password_hash")
+    mock_get_user = mocker.patch("app.db.user_crud.get_user_by_id", return_value=existing_user_mock)
+    mock_dt_now = mocker.patch("app.db.user_crud.datetime")
+    mock_dt_now.now.return_value = fixed_timestamp
+
+    mock_collection = AsyncMock()
+    mock_collection.find_one_and_update.return_value = None 
+    mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
+
+    mock_validate_model = mocker.patch("app.db.user_crud.UserInDB.model_validate")
+    mock_logger_exception = mocker.patch("app.db.user_crud.logger.exception")
+    mock_db_connection = AsyncMock()
+
+    # ========================
+    # --- Act ---
+    # ========================
+    result = await user_crud.update_user(
+        db=mock_db_connection,
+        user_id=test_user_id,
+        user_update=empty_update_payload
+    )
+
+    # ========================
+    # --- Assert ---
+    # ========================
+    assert result is None
+
+    mock_pwd_hash.assert_not_called()
+    mock_get_user.assert_awaited_once()
+
+    # Verifica a chamada a find_one_and_update (para updated_at)
+    mock_collection.find_one_and_update.assert_awaited_once()
+    find_one_update_args, find_one_update_kwargs = mock_collection.find_one_and_update.await_args
+    assert len(find_one_update_args) == 2
+    call_filter = find_one_update_args[0]
+    call_update_doc = find_one_update_args[1]
+    assert call_filter == {"id": str(test_user_id)}
+    assert call_update_doc == {"$set": {"updated_at": fixed_timestamp}}
+    assert find_one_update_kwargs.get("return_document") is True
+
+    mock_validate_model.assert_not_called()
+    mock_logger_exception.assert_not_called()
+
 # =======================================
 # --- Testes para user_crud.delete_user ---
 # =======================================
