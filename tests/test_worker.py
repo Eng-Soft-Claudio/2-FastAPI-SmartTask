@@ -588,6 +588,58 @@ async def test_startup_generic_exception(mocker):
     mock_logger_error.assert_not_called()
     assert ctx.get("db") is None
 
+@pytest.mark.asyncio
+async def test_worker_send_email_exception(mocker, user_active_with_email, task_urgent_score): 
+    """
+    Testa o tratamento de exceção genérica ao tentar enviar email no worker.
+    """
+    # ========================
+    # --- Arrange ---
+    # ========================
+    mock_db = MagicMock()
+    mock_tasks_collection = MagicMock()
+    mock_users_collection = MagicMock()
+    def db_getitem_side_effect(key):
+        if key == "tasks": return mock_tasks_collection
+        if key == "users": return mock_users_collection
+        raise KeyError(key)
+    mock_db.__getitem__.side_effect = db_getitem_side_effect
+    urgent_task_dict = task_urgent_score.model_dump(mode='json')
+    urgent_task_dict['_id'] = "task_email_exc_id"
+    mock_cursor = AsyncMock()
+    mock_cursor.__aiter__.return_value = [urgent_task_dict]
+    mock_tasks_collection.find.return_value = mock_cursor
+    mock_get_user = mocker.patch(
+        "app.worker.user_crud.get_user_by_id",
+        new_callable=AsyncMock,
+        return_value=user_active_with_email
+    )
+    mocker.patch("app.worker.Task.model_validate", return_value=task_urgent_score)
+    simulated_email_error = Exception("Erro simulado no envio de email")
+    mock_send_email = mocker.patch(
+        "app.worker.send_urgent_task_notification",
+        new_callable=AsyncMock,
+        side_effect=simulated_email_error
+    )
+    mock_logger_exception = mocker.patch("app.worker.logger.exception")
+    ctx = {"db": mock_db}
+
+    # ========================
+    # --- Act ---
+    # ========================
+    await check_and_notify_urgent_tasks(ctx)
+
+    # ========================
+    # --- Assert ---
+    # ========================
+    mock_tasks_collection.find.assert_called_once()
+    mock_get_user.assert_called_once_with(mock_db, task_urgent_score.owner_id)
+    mock_send_email.assert_called_once()
+    mock_logger_exception.assert_called_once()
+    log_message = mock_logger_exception.call_args.args[0]
+    assert f"Erro ao processar tarefa urgente (ID no dict: {task_urgent_score.id})" in log_message
+    assert str(simulated_email_error) in log_message
+
 def test_worker_settings_no_redis_url(mocker): 
     """
     Testa se WorkerSettings levanta ValueError quando settings.REDIS_URL é None.
@@ -606,3 +658,112 @@ def test_worker_settings_no_redis_url(mocker):
 
     assert "REDIS_URL não está definida nas configurações" in str(excinfo.value)
     mock_logger_error.assert_called_with("Configuração crítica ausente: REDIS_URL não está definida. Worker ARQ não pode iniciar.")
+
+# =============================================================
+# --- Testes para a função `shutdown` ---
+# =============================================================
+
+@pytest.mark.asyncio
+async def test_shutdown_with_db(mocker): 
+    """Testa a função shutdown quando existe conexão DB no contexto."""
+    # ========================
+    # --- Arrange ---
+    # ========================
+    mock_close_conn = mocker.patch("app.worker.close_mongo_connection", new_callable=AsyncMock)
+    mock_logger_info = mocker.patch("app.worker.logger.info")
+    mock_db = MagicMock() 
+    ctx = {"db": mock_db}
+
+    # ========================
+    # --- Act ---
+    # ========================
+    await app.worker.shutdown(ctx) 
+
+    # ========================
+    # --- Assert ---
+    # ========================
+    mock_logger_info.assert_any_call("Worker ARQ: Iniciando rotinas de shutdown...")
+    mock_close_conn.assert_awaited_once()
+    mock_logger_info.assert_any_call("Worker ARQ: Conexão com MongoDB fechada.")
+
+@pytest.mark.asyncio
+async def test_shutdown_without_db(mocker): 
+    """Testa a função shutdown quando não existe conexão DB no contexto."""
+    # ========================
+    # --- Arrange ---
+    # ========================
+    mock_close_conn = mocker.patch("app.worker.close_mongo_connection", new_callable=AsyncMock)
+    mock_logger_info = mocker.patch("app.worker.logger.info")
+    ctx = {"db": None} 
+
+    # ========================
+    # --- Act ---
+    # ========================
+    await app.worker.shutdown(ctx)
+
+    # ========================
+    # --- Assert ---
+    # ========================
+    mock_logger_info.assert_any_call("Worker ARQ: Iniciando rotinas de shutdown...")
+    mock_close_conn.assert_not_called()
+    mock_logger_info.assert_any_call("Worker ARQ: Nenhuma conexão com MongoDB para fechar (não estava disponível ou já fechada).")
+
+# =============================================================
+# --- Testes para a StartUp ---
+# =============================================================
+@pytest.mark.asyncio
+async def test_startup_success(mocker): 
+    """
+    Testa o caminho de sucesso da função startup.
+    """
+    # ========================
+    # --- Arrange ---
+    # ========================
+    mock_db_connection = MagicMock()
+    mock_connect = mocker.patch("app.worker.connect_to_mongo", return_value=mock_db_connection)
+    mock_logger_info = mocker.patch("app.worker.logger.info")
+    mock_logger_error = mocker.patch("app.worker.logger.error") 
+    ctx = {} 
+
+    # ========================
+    # --- Act ---
+    # ========================
+    await app.worker.startup(ctx)
+
+    # ========================
+    # --- Assert ---
+    # ========================
+    mock_connect.assert_awaited_once()
+    assert ctx.get("db") == mock_db_connection 
+    mock_logger_info.assert_any_call("Worker ARQ: Iniciando rotinas de startup...")
+    mock_logger_info.assert_any_call("Worker ARQ: Conexão com MongoDB estabelecida e armazenada no contexto.")
+    mock_logger_error.assert_not_called()
+
+@pytest.mark.asyncio
+async def test_startup_connect_returns_none(mocker): 
+    """
+    Testa o caminho de falha da função startup quando connect_to_mongo retorna None.
+    """
+    # ========================
+    # --- Arrange ---
+    # ========================
+    mock_connect = mocker.patch("app.worker.connect_to_mongo", return_value=None) 
+    mock_logger_info = mocker.patch("app.worker.logger.info")
+    mock_logger_error = mocker.patch("app.worker.logger.error")
+    ctx = {}
+
+    # ========================
+    # --- Act ---
+    # ========================
+    await app.worker.startup(ctx)
+
+    # ========================
+    # --- Assert ---
+    # ========================
+    mock_connect.assert_awaited_once()
+    assert ctx.get("db") is None 
+    mock_logger_info.assert_called_once_with("Worker ARQ: Iniciando rotinas de startup...") 
+    mock_logger_error.assert_called_once_with(
+        "Worker ARQ: Falha crítica ao conectar ao MongoDB durante o startup. "
+        "A conexão não estará disponível para as tarefas."
+    )

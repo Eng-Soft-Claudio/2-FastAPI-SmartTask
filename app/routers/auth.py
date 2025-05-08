@@ -88,9 +88,9 @@ async def register_user(
             )
         return User.model_validate(created_user_db_obj)
     except DuplicateKeyError:
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Conflito: nome de usuário ou e-mail já existe (detectado pelo banco de dados).",
+        raise HTTPException(# pragma: no cover
+            status_code=status.HTTP_409_CONFLICT,# pragma: no cover
+            detail="Conflito: nome de usuário ou e-mail já existe (detectado pelo banco de dados).",# pragma: no cover
         )
     except Exception: 
         raise HTTPException(

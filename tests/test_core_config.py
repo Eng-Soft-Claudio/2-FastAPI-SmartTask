@@ -9,14 +9,15 @@ a funcionalidade de e-mail está explicitamente habilitada (`MAIL_ENABLED=True`)
 # ========================
 # --- Importações ---
 # ========================
+from logging import config
 import os 
-import importlib 
-
+from unittest.mock import patch 
 import pytest
 from pydantic import ValidationError 
 
 # --- Módulo da Aplicação ---
 from app.core.config import Settings
+import app.core.config as config_module
 
 # ================================================
 # --- Testes de Validação de Configurações de E-mail ---
@@ -207,3 +208,4 @@ def test_settings_mail_enabled_and_all_credentials_provided_passes_validation(mo
             f"Variáveis de ambiente configuradas: {dict(os.environ)}"
         )
     print("  Validação passou como esperado com MAIL_ENABLED=True e todas credenciais de e-mail presentes.")
+
