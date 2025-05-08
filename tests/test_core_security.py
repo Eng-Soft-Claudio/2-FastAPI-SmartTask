@@ -23,7 +23,6 @@ from app.core.security import get_password_hash, verify_password
 # =====================================
 # --- Constantes de Teste ---
 # =====================================
-# Uma senha fixa usada em vários testes para consistência.
 TEST_PLAIN_PASSWORD = "!@#$_uma_SENHA_extremamente_SEGURA_para_TESTES_!@#$"
 
 # =================================================
