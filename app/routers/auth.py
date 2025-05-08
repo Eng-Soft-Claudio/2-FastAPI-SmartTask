@@ -27,9 +27,6 @@ from app.models.user import User, UserCreate, UserUpdate
 # --- Configuração do Router ---
 # ================================
 router = APIRouter(
-    # Prefixo para todas as rotas neste router pode ser adicionado aqui se desejado.
-    # Ex: prefix="/auth",
-    # Agrupa estas rotas sob "Authentication" na documentação OpenAPI.
     tags=["Authentication"], 
 )
 
@@ -37,8 +34,6 @@ router = APIRouter(
 # --- Dependências Específicas do Roteador ---
 # =========================================
 
-# Dependência para obter a instância do banco de dados.
-# Annotated melhora a legibilidade e o suporte do editor.
 DbDep = Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 
 # =====================
@@ -54,7 +49,6 @@ DbDep = Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 )
 async def register_user(
     db: DbDep,
-    # `user_in` é o payload da requisição, validado pelo modelo UserCreate.
     user_in: Annotated[UserCreate, Body(description="Dados do novo usuário para registro.")]
 ):
     """
@@ -71,7 +65,6 @@ async def register_user(
     - `HTTP 409 Conflict`: Se o `username` ou `email` já estiverem em uso.
     - `HTTP 500 Internal Server Error`: Se ocorrer um erro inesperado durante a criação.
     """
-    # Verificação prévia da existência do nome de usuário.
     existing_user_by_username = await user_crud.get_user_by_username(db, user_in.username)
     if existing_user_by_username:
         raise HTTPException(
@@ -79,7 +72,6 @@ async def register_user(
             detail=f"O nome de usuário '{user_in.username}' já existe.",
         )
 
-    # Verificação prévia da existência do e-mail.
     existing_user_by_email = await user_crud.get_user_by_email(db, user_in.email)
     if existing_user_by_email:
         raise HTTPException(
@@ -88,26 +80,19 @@ async def register_user(
         )
 
     try:
-        # Tenta criar o usuário no banco de dados.
         created_user_db_obj = await user_crud.create_user(db=db, user_in=user_in)
         if created_user_db_obj is None:
-            # Se user_crud.create_user retornar None sem levantar exceção (caso não esperado, mas coberto).
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail="Não foi possível criar o usuário devido a um erro interno no servidor."
             )
-        # Converte o objeto UserInDB (do banco) para o modelo User (resposta da API).
         return User.model_validate(created_user_db_obj)
     except DuplicateKeyError:
-        # Esta exceção pode ocorrer se, apesar das verificações acima (race condition)
-        # ou devido a outros índices únicos, uma chave duplicada for detectada pelo MongoDB.
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="Conflito: nome de usuário ou e-mail já existe (detectado pelo banco de dados).",
         )
-    except Exception: # Captura genérica para outros erros inesperados.
-        # Logar a exceção original 'e' é recomendado em um cenário de produção.
-        # logger.exception("Erro inesperado durante o registro do usuário:")
+    except Exception: 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Ocorreu um erro inesperado durante o processo de registro.",
@@ -126,7 +111,6 @@ async def register_user(
 )
 async def login_for_access_token(
     db: DbDep,
-    # `form_data` injeta os dados do formulário (`username` e `password`).
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
 ):
     """
@@ -142,10 +126,8 @@ async def login_for_access_token(
     - `HTTP 401 Unauthorized`: Se o usuário não for encontrado ou a senha estiver incorreta.
     - `HTTP 400 Bad Request`: Se a conta do usuário estiver desativada.
     """
-    # Busca o usuário no banco de dados pelo username.
     user = await user_crud.get_user_by_username(db, form_data.username)
 
-    # Verifica se o usuário existe e se a senha está correta.
     if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -153,15 +135,12 @@ async def login_for_access_token(
             headers={"WWW-Authenticate": "Bearer"}, 
         )
 
-    # Verifica se o usuário está ativo.
     if user.disabled:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, 
             detail="A conta do usuário está inativa."
         )
 
-    # Cria o token de acesso JWT.
-    # O 'subject' do token é o ID do usuário.
     access_token = create_access_token(
         subject=user.id, 
         username=user.username
@@ -180,8 +159,6 @@ async def login_for_access_token(
     response_description="Dados do usuário autenticado (sem a senha).",
 )
 async def read_users_me(
-    # `CurrentUser` é uma dependência que valida o token JWT
-    # e retorna o objeto User (ou UserInDB) correspondente.
     current_user: CurrentUser
 ) -> User:
     """
@@ -195,8 +172,6 @@ async def read_users_me(
 
     Este endpoint simplesmente retorna o usuário fornecido pela dependência.
     """
-    # O tipo de `current_user` já é `User` (ou `UserInDB` que será validado por `User` como response_model).
-    # FastAPI automaticamente validará `current_user` contra `response_model=User`.
     return current_user
 
 @router.put(
@@ -228,7 +203,6 @@ async def update_current_user(
     - `HTTP 500 Internal Server Error`: Para outros erros inesperados.
     """
     try:
-        # O user_id para atualização é o do usuário autenticado (current_user.id)
         updated_user_db_obj = await user_crud.update_user(
             db=db,
             user_id=current_user.id,
@@ -236,23 +210,18 @@ async def update_current_user(
         )
 
         if updated_user_db_obj is None:
-            # Isso pode ocorrer se user_crud.update_user não encontrar o usuário
-            # (improvável se CurrentUser funcionou) ou se houver outro erro interno no CRUD.
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Não foi possível atualizar o usuário. Usuário não encontrado ou erro interno."
             )
         return User.model_validate(updated_user_db_obj)
     except DuplicateKeyError:
-        # Tratado se a atualização do email resultar em um conflito.
         email_em_uso = user_update_payload.email if user_update_payload.email else "N/A"
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=f"Não foi possível atualizar: o e-mail '{email_em_uso}' já está em uso por outra conta.",
         )
     except Exception:
-        # Em produção, logar a exceção original aqui seria ideal.
-        # logger.exception(f"Erro inesperado ao atualizar usuário {current_user.id}:")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Ocorreu um erro inesperado durante a atualização do usuário.",
@@ -287,19 +256,13 @@ async def delete_current_user(
             user_id=current_user.id
         )
         if not deleted_successfully:
-            # Se user_crud.delete_user retornar False, indica que o usuário não foi encontrado
-            # ou a deleção falhou por outro motivo (count != 1).
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, 
                 detail="Não foi possível deletar o usuário. Usuário não encontrado ou erro interno."
             )
-        # Para status 204, não se deve retornar corpo, então o Response(status_code=...) é apropriado.
-        # Alternativamente, FastAPI lida com isso se a função não retornar nada.
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
     except Exception:
-        # Em produção, logar a exceção original aqui seria ideal.
-        # logger.exception(f"Erro inesperado ao deletar usuário {current_user.id}:")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Ocorreu um erro inesperado durante a deleção do usuário.",

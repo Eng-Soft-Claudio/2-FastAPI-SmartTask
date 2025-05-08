@@ -16,17 +16,14 @@ from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
 from app.db.task_crud import create_task_indexes
 from app.core.config import settings
-# Importar a função de setup e o InterceptHandler
 from app.core.logging_config import setup_logging, InterceptHandler
 
 # ===============================
 # --- Configuração de Logging ---
 # ===============================
 
-# Chamar a configuração de logging ANTES de qualquer log da aplicação
 setup_logging(log_level=settings.LOG_LEVEL)
 
-# Obter um logger para este módulo (main.py)
 logger = logging.getLogger(__name__) 
 
 
@@ -48,11 +45,9 @@ async def lifespan(app: FastAPI):
          logger.info("Encerrando ciclo de vida (conexão DB falhou no início).")
          return 
 
-    # Conexão bem-sucedida, define o estado
     app.state.db = db_connection
     logger.info("Conectado ao MongoDB.")
 
-    # Tenta criar índices
     try:
         db_instance = app.state.db 
         logger.info("Tentando criar/verificar índices...")
@@ -62,16 +57,13 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Erro durante a criação de índices: {e}", exc_info=True)
 
-    # Aplicação pronta para receber requisições
     logger.info("Aplicação iniciada e pronta.")
     yield 
 
-    # Código de Shutdown
     logger.info("Iniciando processo de encerramento...")
     await close_mongo_connection()
     logger.info("Conexão com MongoDB fechada.")
     logger.info("Aplicação encerrada.")
-
 
 # =========================
 # --- Instância FastAPI ---
@@ -96,7 +88,6 @@ app = FastAPI(
 # --- Middlewares ---
 # =========================
 
-# Configurar CORS
 if settings.CORS_ALLOWED_ORIGINS: 
     logger.info(f"Configurando CORS para origens: {settings.CORS_ALLOWED_ORIGINS}")
     app.add_middleware(
@@ -108,6 +99,7 @@ if settings.CORS_ALLOWED_ORIGINS:
     )
 else:
     logger.warning("Nenhuma origem CORS configurada (settings.CORS_ALLOWED_ORIGINS está vazia). API pode não ser acessível de frontends em outros domínios.")
+
 # ======================
 # --- Rotas (Routers) ---
 # ======================
@@ -122,14 +114,12 @@ async def read_root():
     """Endpoint raiz para verificar se a API está online."""
     return {"message": f"Bem-vindo à {settings.PROJECT_NAME}!"}
 
-
 # =============================
 # --- Execução (Uvicorn) ---
 # =============================
 if __name__ == "__main__":
     import uvicorn
     logger.info("Iniciando servidor Uvicorn para desenvolvimento...")
-    # 'reload=True' para hot-reload durante desenvolvimento, desativar em produção
     uvicorn.run(
         "main:app",
         host="0.0.0.0",
