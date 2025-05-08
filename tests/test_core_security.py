@@ -49,7 +49,6 @@ def test_get_password_hash_returns_non_empty_string_different_from_plain_passwor
     assert generated_hash != TEST_PLAIN_PASSWORD, "O hash retornado é igual à senha original (não deveria)."
     print("  Sucesso: Hash gerado é uma string não vazia e diferente da senha original.")
 
-
 def test_get_password_hash_generates_different_hashes_for_same_password_due_to_salt():
     """
     Testa se `get_password_hash` gera hashes diferentes para a mesma senha
@@ -68,11 +67,9 @@ def test_get_password_hash_generates_different_hashes_for_same_password_due_to_s
 
     # --- Assert: Verificar as propriedades ---
     assert hash1 != hash2, "Os dois hashes gerados para a mesma senha são iguais (o salt pode não estar funcionando)."
-    # Verifica se ambos os hashes, embora diferentes, são válidos para a senha original.
     assert verify_password(TEST_PLAIN_PASSWORD, hash1) is True, "O primeiro hash não pôde ser verificado com a senha original."
     assert verify_password(TEST_PLAIN_PASSWORD, hash2) is True, "O segundo hash não pôde ser verificado com a senha original."
     print("  Sucesso: Hashes diferentes foram gerados e ambos são válidos.")
-
 
 # =================================================
 # --- Testes para `verify_password` ---
@@ -93,7 +90,6 @@ def test_verify_password_with_correct_password_succeeds():
     assert is_valid is True, "A verificação com a senha correta falhou (deveria ser True)."
     print("  Sucesso: Verificação com senha correta retornou True.")
 
-
 def test_verify_password_with_incorrect_password_fails():
     """
     Testa se `verify_password` retorna `False` quando uma senha incorreta
@@ -109,7 +105,6 @@ def test_verify_password_with_incorrect_password_fails():
     is_valid = verify_password(incorrect_test_password, password_hash)
     assert is_valid is False, "A verificação com senha incorreta passou (deveria ser False)."
     print("  Sucesso: Verificação com senha incorreta retornou False.")
-
 
 def test_verify_password_with_empty_plain_password_fails():
     """
@@ -137,13 +132,10 @@ def test_verify_password_with_plain_password_against_empty_hash_string_fails():
     print(f"\nTeste: verify_password com string de hash vazia ('{empty_hash_string}')")
 
     # --- Act & Assert: Verificar senha contra hash vazio ---
-    # Passlib geralmente retorna False para formatos de hash inválidos ou vazios
-    # sem levantar uma exceção no nível de `verify`.
     is_valid = verify_password(TEST_PLAIN_PASSWORD, empty_hash_string)
     assert is_valid is False, \
         "A verificação contra um hash vazio deveria retornar False (ou a biblioteca pode ter outro comportamento)."
     print("  Sucesso: Verificação contra hash vazio retornou False.")
-
 
 def test_verify_password_with_invalid_hash_format_fails():
     """
@@ -155,8 +147,6 @@ def test_verify_password_with_invalid_hash_format_fails():
     print(f"\nTeste: verify_password com formato de hash inválido: '{invalid_hash_string}'")
 
     # --- Act & Assert: Verificar senha contra hash inválido ---
-    # Passlib, ao encontrar um hash que não pode decodificar ou que não corresponde ao formato esperado,
-    # geralmente retorna False para `verify` em vez de levantar uma exceção.
     is_valid = verify_password(TEST_PLAIN_PASSWORD, invalid_hash_string)
     assert is_valid is False, \
         "A verificação contra um hash de formato inválido deveria retornar False."
