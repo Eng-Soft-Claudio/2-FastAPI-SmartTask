@@ -1,3 +1,4 @@
+# descriptive/descriptive.py
 """
 Este script varre recursivamente uma estrutura de diretórios a partir de um caminho raiz,
 identifica todos os arquivos `.py`, e gera um arquivo de saída com estilo de **livro**.

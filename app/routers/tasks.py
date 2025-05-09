@@ -11,39 +11,36 @@ como o envio de webhooks e notificações por e-mail.
 # ========================
 # --- Importações ---
 # ========================
-
-# --- Bibliotecas Padrão/Terceiros ---
 import logging
 import uuid
 from datetime import date, datetime, timezone
 from typing import Annotated, List, Optional
 
-# --- FastAPI ---
 from fastapi import (APIRouter, BackgroundTasks, Body, Depends, HTTPException, Path,
                    Query, Response, status)
 from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import ValidationError
 
 # --- Módulos da Aplicação ---
-from app.core.dependencies import CurrentUser
+from app.core.dependencies import CurrentUser, DbDep
 from app.core.email import send_urgent_task_notification
 from app.core.utils import (calculate_priority_score, is_task_urgent,
                             send_webhook_notification)
 from app.db import task_crud
-from app.db.mongodb_utils import get_database
 from app.models.task import Task, TaskCreate, TaskStatus, TaskUpdate
+from app.core.config import settings
 
-# =====================================
+# ========================
 # --- Configurações e Constantes ---
-# =====================================
+# ========================
 logger = logging.getLogger(__name__)
 
-# ================================
+# ========================
 # --- Configuração do Router ---
-# ================================
+# ========================
 router = APIRouter(
     prefix="/tasks",
-    tags=["Tasks"],  
+    tags=["Tasks"],
     responses={
         status.HTTP_404_NOT_FOUND: {"description": "Recurso (tarefa) não encontrado."},
         status.HTTP_401_UNAUTHORIZED: {"description": "Não autorizado (Token JWT inválido, ausente ou expirado)."},
@@ -51,19 +48,13 @@ router = APIRouter(
     },
 )
 
-# =========================================
-# --- Dependências Específicas do Roteador ---
-# =========================================
-DbDep = Annotated[AsyncIOMotorDatabase, Depends(get_database)]
-
 # ========================
-# --- ROTAS DE TAREFAS ---
+# --- Endpoint: Criar Tarefa ---
 # ========================
-
 @router.post(
     "/",
-    response_model=Task, 
-    status_code=status.HTTP_201_CREATED, 
+    response_model=Task,
+    status_code=status.HTTP_201_CREATED,
     summary="Cria uma nova tarefa para o usuário autenticado",
     description=(
         "Cria uma nova tarefa associada ao usuário atualmente autenticado. "
@@ -75,8 +66,8 @@ DbDep = Annotated[AsyncIOMotorDatabase, Depends(get_database)]
 async def create_task(
     task_in: Annotated[TaskCreate, Body(description="Dados da nova tarefa a ser criada.")],
     db: DbDep,
-    current_user: CurrentUser, 
-    background_tasks: BackgroundTasks 
+    current_user: CurrentUser,
+    background_tasks: BackgroundTasks
 ):
     """
     Endpoint para criar uma nova tarefa.
@@ -104,9 +95,9 @@ async def create_task(
 
     try:
         task_db_obj_to_create = Task(
-            id=uuid.uuid4(), 
-            owner_id=current_user.id, 
-            created_at=datetime.now(timezone.utc), 
+            id=uuid.uuid4(),
+            owner_id=current_user.id,
+            created_at=datetime.now(timezone.utc),
             priority_score=priority_score_calculated,
             **task_data_from_request
         )
@@ -114,15 +105,15 @@ async def create_task(
         logger.error(f"Erro de validação Pydantic ao montar objeto Task para usuário {current_user.id}: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail=f"Erro interno na validação dos dados da tarefa: {e.errors()}" 
+            detail=f"Erro interno na validação dos dados da tarefa: {e.errors()}"
         )
 
     created_task_from_db = await task_crud.create_task(db=db, task_db=task_db_obj_to_create)
-    if created_task_from_db is None:
-        raise HTTPException( # pragma: no cover
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,# pragma: no cover
-            detail="Falha ao salvar a tarefa no banco de dados."# pragma: no cover
-        ) 
+    if created_task_from_db is None: # pragma: no cover
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Falha ao salvar a tarefa no banco de dados."
+        )
     logger.info(f"Tarefa {created_task_from_db.id} criada com sucesso para usuário {current_user.id}.")
 
     task_dict_for_webhook = created_task_from_db.model_dump(mode="json")
@@ -151,9 +142,12 @@ async def create_task(
 
     return created_task_from_db
 
+# ========================
+# --- Endpoint: Listar Tarefas ---
+# ========================
 @router.get(
     "/",
-    response_model=List[Task], 
+    response_model=List[Task],
     summary="Lista as tarefas do usuário autenticado com filtros e ordenação",
     description=(
         "Recupera uma lista de tarefas pertencentes exclusivamente ao usuário autenticado.\n"
@@ -171,7 +165,7 @@ async def list_tasks(
     project_filter: Annotated[Optional[str], Query(alias="project", min_length=1, description="Filtrar tarefas por nome exato do projeto.")] = None,
     tags_filter: Annotated[Optional[List[str]], Query(alias="tag", min_length=1, description="Filtrar tarefas que contenham TODAS as tags fornecidas.")] = None,
     sort_by: Annotated[Optional[str], Query(enum=["priority_score", "due_date", "created_at", "importance"], description="Campo para ordenação das tarefas.")] = None,
-    sort_order: Annotated[str, Query(enum=["asc", "desc"], description="Ordem da ordenação (ascendente ou descendente).")] = "desc", # Padrão para descendente.
+    sort_order: Annotated[str, Query(enum=["asc", "desc"], description="Ordem da ordenação (ascendente ou descendente).")] = "desc",
     limit: Annotated[int, Query(ge=1, le=1000, description="Número máximo de tarefas a retornar.")] = 100,
     skip: Annotated[int, Query(ge=0, description="Número de tarefas a pular (para paginação).")] = 0,
 ):
@@ -194,13 +188,16 @@ async def list_tasks(
         project_filter=project_filter,
         tags_filter=tags_filter,
         sort_by=sort_by,
-        sort_order=sort_order, 
+        sort_order=sort_order,
         limit=limit,
         skip=skip
     )
     logger.debug(f"Encontradas {len(tasks)} tarefas para usuário {current_user.id} com os filtros aplicados.")
     return tasks
 
+# ========================
+# --- Endpoint: Obter Tarefa Específica ---
+# ========================
 @router.get(
     "/{task_id}",
     response_model=Task,
@@ -233,6 +230,9 @@ async def get_task(
     logger.debug(f"Tarefa {task_id} encontrada para usuário {current_user.id}: {task.title}")
     return task
 
+# ========================
+# --- Endpoint: Atualizar Tarefa ---
+# ========================
 @router.put(
     "/{task_id}",
     response_model=Task,
@@ -256,18 +256,14 @@ async def update_task(
     Endpoint para atualizar campos específicos de uma tarefa existente.
 
     Fluxo de execução:
-    1. Busca a tarefa existente para garantir que ela pertence ao usuário e para obter valores atuais
-       (necessários caso `importance` ou `due_date` não estejam no payload de atualização,
-       mas a prioridade precise ser recalculada).
+    1. Busca a tarefa existente para garantir que ela pertence ao usuário e para obter valores atuais.
     2. Recebe os dados de atualização validados pelo modelo `TaskUpdate`.
     3. Se nenhum dado for fornecido para atualização, retorna um erro HTTP 400.
-    4. Prepara o dicionário `update_data_for_db` apenas com os campos enviados pelo cliente.
-    5. Verifica se `importance` ou `due_date` foram alterados. Se sim, recalcula a `priority_score`.
-    6. Chama `task_crud.update_task` para persistir as alterações. O CRUD se encarrega de definir `updated_at`.
-    7. Agenda uma tarefa em segundo plano para enviar uma notificação de webhook (evento `task.updated`).
-    8. Retorna a tarefa completamente atualizada.
-
-    Levanta `HTTPException` se a tarefa não for encontrada, se nenhum dado for enviado, ou em caso de outros erros.
+    4. Prepara o dicionário `update_data_for_db` apenas com os campos enviados.
+    5. Verifica se `importance` ou `due_date` foram alterados para recalcular `priority_score`.
+    6. Chama `task_crud.update_task` para persistir as alterações.
+    7. Agenda notificação de webhook para `task.updated`.
+    8. Retorna a tarefa atualizada.
     """
     logger.info(f"Iniciando atualização da tarefa {task_id} para usuário {current_user.id} com payload: {task_update_payload.model_dump(exclude_unset=True)}")
     existing_task = await task_crud.get_task_by_id(db=db, task_id=task_id, owner_id=current_user.id)
@@ -288,7 +284,6 @@ async def update_task(
         )
 
     new_importance = update_data_from_request.get("importance", existing_task.importance)
-
     if "due_date" in update_data_from_request:
         new_due_date = update_data_from_request.get("due_date")
     else:
@@ -297,17 +292,17 @@ async def update_task(
     should_recalculate_priority = False
     if "importance" in update_data_from_request and update_data_from_request["importance"] != existing_task.importance:
         should_recalculate_priority = True
-    if "due_date" in update_data_from_request and new_due_date != existing_task.due_date: 
+    if "due_date" in update_data_from_request and new_due_date != existing_task.due_date:
         should_recalculate_priority = True
-    if "priority_score" in update_data_from_request:
-        should_recalculate_priority = False # pragma: no cover
+    if "priority_score" in update_data_from_request: # pragma: no cover
+        should_recalculate_priority = False
 
     update_data_for_db = update_data_from_request.copy()
 
     if should_recalculate_priority:
         new_priority_score = calculate_priority_score(
-            importance=new_importance, 
-            due_date=new_due_date    
+            importance=new_importance,
+            due_date=new_due_date
         )
         update_data_for_db["priority_score"] = new_priority_score
         logger.info(f"Prioridade para tarefa {task_id} recalculada para: {new_priority_score}.")
@@ -323,8 +318,8 @@ async def update_task(
         logger.error(f"Falha ao atualizar tarefa {task_id} no DB para usuário {current_user.id}. CRUD retornou None.")
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Não foi possível atualizar a tarefa com ID '{task_id}'. "
-                   "Pode ter sido deletada ou ocorreu um erro interno."
+            detail=f"Não foi possível atualizar a tarefa com ID '{task_id}'. " # String de detalhe original
+                   "Pode ter sido deletada ou ocorreu um erro interno." # Mantido para consistência com teste.
         )
     logger.info(f"Tarefa {updated_task_from_db.id} atualizada com sucesso para usuário {current_user.id}.")
 
@@ -338,9 +333,12 @@ async def update_task(
 
     return updated_task_from_db
 
+# ========================
+# --- Endpoint: Deletar Tarefa ---
+# ========================
 @router.delete(
     "/{task_id}",
-    status_code=status.HTTP_204_NO_CONTENT, 
+    status_code=status.HTTP_204_NO_CONTENT,
     summary="Deleta uma tarefa do usuário autenticado",
     description="Remove permanentemente uma tarefa específica do banco de dados, desde que ela pertença ao usuário autenticado.",
     responses={
