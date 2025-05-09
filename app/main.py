@@ -1,4 +1,9 @@
 # app/main.py
+"""
+Ponto de entrada principal e configuração da aplicação FastAPI SmartTask.
+Define a instância da aplicação, middlewares, rotas, ciclo de vida (lifespan)
+e o endpoint raiz. Também inclui o setup de logging inicial.
+"""
 
 # ========================
 # --- Importações ---
@@ -15,19 +20,20 @@ from app.routers import auth
 from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
 from app.db.task_crud import create_task_indexes
-from app.core.config import Settings, settings
-from app.core.logging_config import setup_logging
+from app.core.config import Settings, settings # settings importado, Settings para type hint
+from app.core.logging_config import setup_logging # InterceptHandler não precisa ser importado aqui
 
-# ===============================
+# ========================
 # --- Configuração de Logging ---
-# ===============================
+# ========================
 setup_logging(log_level=settings.LOG_LEVEL)
 logger = logging.getLogger(__name__)
 
-# =======================================
+# ========================
 # --- Função de Setup do Middleware CORS ---
-# =======================================
+# ========================
 def _setup_cors_middleware(app_instance: FastAPI, current_settings: Settings):
+    """Configura o middleware CORS para a aplicação."""
     if current_settings.CORS_ALLOWED_ORIGINS:
         logger.info(f"Configurando CORS para origens: {current_settings.CORS_ALLOWED_ORIGINS}")
         app_instance.add_middleware(
@@ -43,23 +49,27 @@ def _setup_cors_middleware(app_instance: FastAPI, current_settings: Settings):
             "API pode não ser acessível de frontends em outros domínios."
         )
 
-# ==================================
+# ========================
 # --- Ciclo de Vida (Lifespan) ---
-# ==================================
+# ========================
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    """
+    Gerencia o ciclo de vida da aplicação.
+
+    Conecta ao MongoDB e cria índices no startup.
+    Fecha a conexão com o MongoDB no shutdown.
+    """
     logger.info("Iniciando ciclo de vida da aplicação...")
     db_connection = await connect_to_mongo()
 
     if db_connection is None:
         logger.critical("Falha fatal ao conectar ao MongoDB na inicialização. App pode não funcionar corretamente.")
-        # O yield abaixo ainda permite que a aplicação continue e finalize "graciosamente"
-        # sem o db.state.db configurado, mas tendo logado o erro crítico.
         yield
         logger.info("Encerrando ciclo de vida (conexão DB falhou no início).")
         return
 
-    app.state.db = db_connection
+    app.state.db = db_connection # Armazena a conexão no estado da app
     logger.info("Conectado ao MongoDB.")
 
     try:
@@ -71,17 +81,18 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"Erro durante a criação de índices: {e}", exc_info=True)
 
-    logger.info("Aplicação iniciada e pronta.") # Linha para ser coberta
-    yield # Linha para ser coberta
+    logger.info("Aplicação iniciada e pronta.") # pragma: no cover
+    yield # pragma: no cover
 
+    # Código abaixo é executado no shutdown da aplicação
     logger.info("Iniciando processo de encerramento...")
     await close_mongo_connection()
     logger.info("Conexão com MongoDB fechada.")
     logger.info("Aplicação encerrada.")
 
-# =========================
+# ========================
 # --- Instância FastAPI ---
-# =========================
+# ========================
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description="API RESTful para gerenciamento de tarefas com prioridade inteligente.",
@@ -98,27 +109,28 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# =========================
-# --- Middlewares ---
-# =========================
+# ========================
+# --- Configuração de Middlewares ---
+# ========================
 _setup_cors_middleware(app, settings)
 
-# ======================
+# ========================
 # --- Rotas (Routers) ---
-# ======================
+# ========================
 app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Authentication"])
 app.include_router(tasks.router, prefix=settings.API_V1_STR, tags=["Tasks"])
 
-# =====================
+# ========================
 # --- Endpoint Raiz ---
-# =====================
+# ========================
 @app.get("/", tags=["Root"])
 async def read_root():
+    """Endpoint raiz para verificar se a API está online."""
     return {"message": f"Bem-vindo à {settings.PROJECT_NAME}!"}
 
-# =============================
+# ========================
 # --- Execução (Uvicorn) ---
-# =============================
+# ========================
 if __name__ == "__main__": # pragma: no cover
     import uvicorn # pragma: no cover
     logger.info("Iniciando servidor Uvicorn para desenvolvimento...") # pragma: no cover
