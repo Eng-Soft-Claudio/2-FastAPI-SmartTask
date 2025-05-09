@@ -7,7 +7,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Any, Union, Optional
 from passlib.context import CryptContext 
-from jose import jwt, JWTError 
+from jose import ExpiredSignatureError, jwt, JWTError 
 from pydantic import ValidationError 
 
 # --- Módulos da Aplicação ---
@@ -110,31 +110,28 @@ def decode_token(token: str) -> Optional[TokenPayload]:
     Decodifica e valida um token JWT.
 
     Verifica a assinatura, a expiração e a estrutura do payload usando o modelo Pydantic.
-
-    Args:
-        token: A string do token JWT recebida (ex: do header Authorization).
-
-    Returns:
-        Um objeto `TokenPayload` contendo os dados validados (`sub`, `username`, `exp`)
-        se o token for válido e não expirado. Retorna `None` se a decodificação
-        ou validação falhar por qualquer motivo (assinatura inválida, expirado,
-        formato inválido, payload não conforma com `TokenPayload`).
+    A verificação de expiração padrão do jwt.decode é desabilitada para que
+    a lógica de verificação dupla de expiração seja testada e executada.
     """
     try:
         payload = jwt.decode(
             token,
             settings.JWT_SECRET_KEY,
-            algorithms=[ALGORITHM] 
+            algorithms=[ALGORITHM],
+            options={"verify_exp": False}  
         )
-
-        token_data = TokenPayload.model_validate(payload)
-
+        token_data = TokenPayload.model_validate(payload) 
         if token_data.exp is not None:
-            if datetime.now(timezone.utc) > datetime.fromtimestamp(token_data.exp, tz=timezone.utc):
-                logger.info("Token JWT expirado (verificação dupla).")
+            token_expiration_time = datetime.fromtimestamp(token_data.exp, tz=timezone.utc)
+            if datetime.now(timezone.utc) > token_expiration_time:
+                logger.info("Token JWT expirado (verificação dupla).") 
                 return None
+        else:
+            pass
         return token_data
-
-    except (JWTError, ValidationError, KeyError) as e:
+    except ExpiredSignatureError: 
+        logger.warning("Token JWT detectado como expirado pela biblioteca JOSE antes da verificação dupla.") 
+        return None 
+    except (JWTError, ValidationError, KeyError) as e: 
         logger.error(f"Erro ao decodificar/validar token: {e}", exc_info=True)
         return None

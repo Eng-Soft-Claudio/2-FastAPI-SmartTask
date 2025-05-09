@@ -15,15 +15,25 @@ devido ao uso de "salt".
 # ========================
 # --- Importações ---
 # ========================
-import pytest 
+from typing import Optional
+from venv import logger
+import pytest
+from datetime import datetime, timedelta, timezone
+from jose import ExpiredSignatureError, jwt
+import uuid
+
 
 # --- Módulos da Aplicação ---
-from app.core.security import get_password_hash, verify_password
+from app.core.config import settings
+from app.core.security import  ALGORITHM, decode_token, get_password_hash, verify_password, create_access_token
 
 # =====================================
 # --- Constantes de Teste ---
 # =====================================
 TEST_PLAIN_PASSWORD = "!@#$_uma_SENHA_extremamente_SEGURA_para_TESTES_!@#$"
+TEST_USER_ID_JWT = str(uuid.uuid4())
+TEST_USERNAME_JWT = "test_jwt_user"
+CUSTOM_EXPIRATION_MINUTES = 15
 
 # =================================================
 # --- Testes para `get_password_hash` ---
@@ -150,3 +160,137 @@ def test_verify_password_with_invalid_hash_format_fails():
     assert is_valid is False, \
         "A verificação contra um hash de formato inválido deveria retornar False."
     print("  Sucesso: Verificação contra hash de formato inválido retornou False.")
+
+# =================================================
+# --- Testes para JWT (create_access_token, decode_token) ---
+# =================================================
+
+def test_create_access_token_with_custom_expires_delta():
+    """
+    Testa se `create_access_token` utiliza o `expires_delta` fornecido
+    para definir o tempo de expiração do token.
+    Cobre a linha onde `expire = datetime.now(timezone.utc) + expires_delta` é executada.
+    """
+    print(f"\nTeste: create_access_token com expires_delta customizado")
+    custom_delta = timedelta(minutes=CUSTOM_EXPIRATION_MINUTES)
+    
+    # --- Act: Criar o token com expires_delta customizado ---
+    start_time = datetime.now(timezone.utc)
+    token = create_access_token(
+        subject=TEST_USER_ID_JWT,
+        username=TEST_USERNAME_JWT,
+        expires_delta=custom_delta
+    )
+    end_time = datetime.now(timezone.utc)
+    print(f"  Token gerado: '{token[:20]}...'")
+
+    # --- Assert: Decodificar e verificar o payload e a expiração ---
+    assert token is not None, "Token não deveria ser None."
+    assert isinstance(token, str), "Token deveria ser uma string."
+    try:
+        payload = jwt.decode(
+            token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM]
+        )
+        print(f"  Payload decodificado: {payload}")
+        expected_sub = str(TEST_USER_ID_JWT)
+        assert payload.get("sub") == expected_sub, \
+            f"Claim 'sub' incorreto. Esperado: {expected_sub}, Obtido: {payload.get('sub')}"
+        assert payload.get("username") == TEST_USERNAME_JWT, \
+            f"Claim 'username' incorreto. Esperado: {TEST_USERNAME_JWT}, Obtido: {payload.get('username')}"
+        exp_timestamp = payload.get("exp")
+        assert exp_timestamp is not None, "Claim 'exp' não encontrado no token."
+        expected_expire_earliest = start_time + custom_delta
+        expected_expire_latest = end_time + custom_delta
+        token_expiration_time = datetime.fromtimestamp(exp_timestamp, tz=timezone.utc)
+        assert expected_expire_earliest - timedelta(seconds=5) <= token_expiration_time <= expected_expire_latest + timedelta(seconds=5), \
+            f"Tempo de expiração fora do esperado. Esperado ~{start_time + custom_delta}, Obtido: {token_expiration_time}"
+        print(f"  Sucesso: Token criado com expires_delta customizado e claims corretos.")
+    except jwt.JWTError as e:
+        pytest.fail(f"Falha ao decodificar o token gerado: {e}")
+
+def test_decode_token_with_expired_token_returns_none_and_logs(caplog): 
+    """
+    Testa se `decode_token` retorna `None` e registra um log informativo
+    quando um token JWT sintaticamente válido, mas expirado, é fornecido.
+    Cobre as linhas 134-135 (logger.info e return None dentro da verificação de expiração).
+    """
+    print(f"\nTeste: decode_token com token expirado")
+    
+    # --- Arrange: Criar um token que já está expirado ---
+    expired_delta = timedelta(hours=-1)
+    expire_time = datetime.now(timezone.utc) + expired_delta
+    to_encode = {
+        "exp": expire_time, 
+        "sub": str(TEST_USER_ID_JWT),
+        "username": TEST_USERNAME_JWT,
+    }
+    expired_token = jwt.encode(
+        to_encode, 
+        settings.JWT_SECRET_KEY, 
+        algorithm=settings.JWT_ALGORITHM
+    )
+    print(f"  Token expirado gerado: '{expired_token[:20]}...'")
+
+    # --- Act: Tentar decodificar o token expirado ---
+
+    decoded_payload = decode_token(expired_token)
+
+    # --- Assert: Verificar se o resultado é None e o log foi feito ---
+    assert decoded_payload is None, "Token expirado deveria resultar em None."
+    
+    log_messages = [record.getMessage() for record in caplog.records if record.name == 'app.core.security']
+    assert any("Token JWT expirado (verificação dupla)." in message for message in log_messages), \
+        "Mensagem de log para token expirado não encontrada."
+    print("  Sucesso: decode_token retornou None para token expirado e logou a informação.")
+
+def test_decode_token_without_expiration_claim(caplog):
+    """
+    Testa se `decode_token` processa corretamente um token válido
+    que não possui o claim 'exp'. Espera-se que retorne os dados do token.
+    Cobre o bloco 'else: pass' na verificação de token_data.exp.
+    """
+    print("\nTeste: decode_token com token válido sem claim 'exp'")
+    user_id_as_string = str(uuid.uuid4()) 
+    to_encode_no_exp = {
+        "sub": user_id_as_string,
+        "username": TEST_USERNAME_JWT,
+    }
+    token_no_exp = jwt.encode(
+        to_encode_no_exp, 
+        settings.JWT_SECRET_KEY, 
+        algorithm=ALGORITHM
+    )
+    print(f"  Token sem 'exp' gerado: '{token_no_exp[:20]}...'")
+    decoded_payload = decode_token(token_no_exp)
+    assert decoded_payload is not None, "Token sem 'exp' deveria ser decodificado se 'exp' é opcional."
+    assert str(decoded_payload.sub) == user_id_as_string
+    assert decoded_payload.username == TEST_USERNAME_JWT
+    assert decoded_payload.exp is None, "O campo 'exp' do payload deveria ser None."
+    assert not any("Token JWT expirado (verificação dupla)." in record.getMessage() for record in caplog.records if record.name == 'app.core.security'), \
+        "Log de token expirado não deveria ser emitido para token sem claim 'exp'."
+    print("  Sucesso: decode_token processou token sem 'exp' e retornou payload.")
+
+def test_decode_token_handles_direct_expired_signature_error_from_jose(mocker, caplog):
+    """
+    Testa o tratamento do bloco `except ExpiredSignatureError` em `decode_token`.
+    Isso simula o caso onde `jwt.decode` diretamente levanta ExpiredSignatureError,
+    mesmo que a lógica atual use `options={'verify_exp': False}`.
+    Cobre as linhas 133-134.
+    """
+    print("\nTeste: decode_token com ExpiredSignatureError direta do jose")
+    some_token_string = "um.token.qualquer_expirado_simulado"
+    mocked_jwt_decode = mocker.patch("app.core.security.jwt.decode", side_effect=ExpiredSignatureError("Simulated JOSE expiration"))
+    decoded_payload = decode_token(some_token_string)
+    assert decoded_payload is None, "Deveria retornar None quando ExpiredSignatureError é capturada."
+    mocked_jwt_decode.assert_called_once_with(
+        some_token_string,
+        settings.JWT_SECRET_KEY,
+        algorithms=[ALGORITHM],
+        options={"verify_exp": False} 
+    )
+    log_messages = [record.getMessage() for record in caplog.records if record.name == 'app.core.security']
+    assert any("Token JWT detectado como expirado pela biblioteca JOSE" in message for message in log_messages), \
+        "Mensagem de log esperada para ExpiredSignatureError não encontrada."
+    print("  Sucesso: decode_token lidou com ExpiredSignatureError direta e logou corretamente.")
