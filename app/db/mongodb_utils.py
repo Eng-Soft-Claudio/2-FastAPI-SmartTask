@@ -1,51 +1,54 @@
 # app/db/mongodb_utils.py
+"""
+Este módulo gerencia a conexão com o banco de dados MongoDB.
+Inclui funções para conectar, fechar a conexão e obter a instância do banco de dados.
+Utiliza a biblioteca Motor para interações assíncronas com o MongoDB.
+"""
 
 # ========================
 # --- Importações ---
 # ========================
 import logging
 from typing import Optional
-import motor.motor_asyncio 
-from motor.motor_asyncio import AsyncIOMotorDatabase 
+import motor.motor_asyncio
+from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase 
 
 # --- Módulos da Aplicação ---
-from app.core.config import settings 
+from app.core.config import settings
 
-# ===============================
+# ========================
 # --- Configuração do Logger ---
-# ===============================
+# ========================
 logger = logging.getLogger(__name__)
 
-# ====================================
+# ========================
 # --- Variáveis Globais de Conexão ---
-# ====================================
-db_client: Optional[motor.motor_asyncio.AsyncIOMotorClient] = None
+# ========================
+# Estas variáveis mantêm o estado da conexão MongoDB para a aplicação.
+db_client: Optional[AsyncIOMotorClient] = None
 db_instance: Optional[AsyncIOMotorDatabase] = None
 
-# ==============================
+# ========================
 # --- Função de Conexão ---
-# ==============================
+# ========================
 async def connect_to_mongo() -> Optional[AsyncIOMotorDatabase]:
     """
-    Estabelece a conexão com o MongoDB na inicialização da aplicação.
+    Estabelece a conexão com o MongoDB.
 
-    - Cria um cliente AsyncIOMotorClient usando a MONGODB_URL das configurações.
-    - Define um timeout para seleção do servidor.
-    - Envia um comando 'ping' para verificar a conexão.
-    - Define as variáveis globais `db_client` e `db_instance`.
-    - Trata exceções de conexão e loga erros.
+    Cria um cliente AsyncIOMotorClient, verifica a conexão com um comando 'ping',
+    e define as variáveis globais `db_client` e `db_instance`.
 
     Returns:
-        A instância do banco de dados (AsyncIOMotorDatabase) se a conexão for bem-sucedida,
-        ou None em caso de falha.
+        A instância AsyncIOMotorDatabase se a conexão for bem-sucedida, None caso contrário.
     """
     global db_client, db_instance
     logger.info("Tentando conectar ao MongoDB...")
     try:
         db_client = motor.motor_asyncio.AsyncIOMotorClient(
             settings.MONGODB_URL,
-            serverSelectionTimeoutMS=5000 
+            serverSelectionTimeoutMS=5000 # Timeout para seleção do servidor
         )
+        # Verifica a conexão
         await db_client.admin.command('ping')
         logger.info("Comando ping para MongoDB bem-sucedido.")
 
@@ -59,41 +62,42 @@ async def connect_to_mongo() -> Optional[AsyncIOMotorDatabase]:
         db_instance = None
         return None
 
-# ==============================
-# --- Função de Fechamento ---
-# ==============================
+# ========================
+# --- Função de Fechamento de Conexão ---
+# ========================
 async def close_mongo_connection():
     """
-    Fecha a conexão com o MongoDB durante o encerramento da aplicação.
-
-    Verifica se o cliente global `db_client` foi inicializado antes de tentar fechar.
+    Fecha a conexão com o MongoDB.
+    Verifica se o cliente `db_client` foi inicializado antes de tentar fechar.
     """
-    global db_client
+    global db_client # Indica que estamos referenciando a variável global
     logger.info("Tentando fechar conexão com MongoDB...")
     if db_client:
         db_client.close()
         logger.info("Conexão com MongoDB fechada.")
+        # Opcionalmente, resetar db_client e db_instance para None após fechar:
+        # db_client = None
+        # db_instance = None
     else:
         logger.warning("Tentativa de fechar conexão com MongoDB, mas cliente não estava inicializado.")
 
-# =============================
-# --- Função de Acesso DB ---
-# =============================
+# ========================
+# --- Função de Acesso ao DB ---
+# ========================
 def get_database() -> AsyncIOMotorDatabase:
     """
     Retorna a instância global do banco de dados MongoDB.
 
-    Função utilitária para ser usada como dependência FastAPI ou chamada
-    diretamente por outras partes da aplicação que precisam acessar o DB.
+    Usada como dependência FastAPI ou chamada por outras partes da aplicação.
 
     Raises:
-        RuntimeError: Se a função for chamada antes de `connect_to_mongo`
-                      ter inicializado `db_instance` com sucesso.
+        RuntimeError: Se chamada antes de `connect_to_mongo` inicializar `db_instance`.
 
     Returns:
-        A instância `AsyncIOMotorDatabase` global.
+        A instância AsyncIOMotorDatabase.
     """
     if db_instance is None:
+        # Este log de erro é importante para diagnóstico
         logger.error("Tentativa de obter instância do DB antes da inicialização!")
         raise RuntimeError("A conexão com o banco de dados não foi inicializada.")
     return db_instance
