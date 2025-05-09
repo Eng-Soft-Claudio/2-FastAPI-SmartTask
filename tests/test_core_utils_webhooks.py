@@ -321,3 +321,117 @@ async def test_send_webhook_does_nothing_if_url_not_configured(mocker):
         expected_debug_message = "Webhook URL não configurada, pulando envio."
         mock_utils_logger.debug.assert_called_once_with(expected_debug_message)
         print("  Sucesso: Nenhuma tentativa de envio de webhook e log de debug correto quando URL não configurada.")
+
+# =======================================================
+@respx.mock # Necessário para que httpx não seja realmente chamado, pois retornaremos antes
+async def test_send_webhook_signature_generation_failure(mocker):
+    """
+    Testa o tratamento de erro quando a geração da assinatura HMAC falha.
+    """
+    print("\nTeste: send_webhook_notification - Falha na geração da assinatura HMAC.")
+    # Arrange: Configurar WEBHOOK_SECRET e mokar hmac.new para falhar
+    test_secret = "super_secret"
+    mocker.patch.object(settings, 'WEBHOOK_SECRET', test_secret) # Usar mocker.patch.object
+    
+    mock_utils_logger = mocker.patch("app.core.utils.logger")
+    # Mokar hmac.new para levantar uma exceção
+    mocker.patch("app.core.utils.hmac.new", side_effect=Exception("HMAC generation error"))
+
+    # Act: Chamar a função
+    await send_webhook_notification(TEST_EVENT_TYPE_WEBHOOK, TEST_TASK_DATA_FOR_WEBHOOK)
+
+    # Assert: Verificar se o logger.error foi chamado e se não houve tentativa de envio HTTP
+    mock_utils_logger.error.assert_called_once()
+    error_log_message = mock_utils_logger.error.call_args[0][0]
+    assert "Erro ao gerar assinatura HMAC para webhook" in error_log_message
+    assert "HMAC generation error" in error_log_message # Verificar se a msg da exceção está no log
+    
+    # Verificar que o httpx.post não foi chamado (pois deve retornar antes)
+    # Se a rota de respx não for definida e chamada, respx.calls estará vazio.
+    assert respx.calls.call_count == 0, "Chamada HTTP foi feita indevidamente após falha na assinatura."
+    print("  Sucesso: Falha na geração de assinatura HMAC tratada e logada.")
+
+@respx.mock
+async def test_send_webhook_unexpected_generic_exception_during_send(mocker):
+    print("\nTeste: send_webhook_notification - Exceção genérica inesperada no envio.")
+    mock_utils_logger = mocker.patch("app.core.utils.logger")
+
+    # Precisamos que `client.post` levante uma exceção quando awaited.
+    # Mokar a classe AsyncClient para que sua instância retornada
+    # tenha um método post que é um AsyncMock que levanta uma exceção.
+
+    mock_post_method = AsyncMock(side_effect=Exception("Erro genérico simulado no post"))
+
+    # Moka o construtor da classe httpx.AsyncClient
+    # O construtor retorna um objeto (mock_client_context)
+    # que, quando usado em `async with` (via __aenter__), retorna
+    # outro objeto (mock_client_operations) que tem o método 'post'.
+    
+    mock_client_operations = AsyncMock()
+    mock_client_operations.post = mock_post_method # O método post levanta a exceção
+
+    mock_client_context = AsyncMock()
+    # __aenter__ deve ser um método assíncrono que retorna o objeto com 'post'
+    mock_client_context.__aenter__ = AsyncMock(return_value=mock_client_operations)
+    # __aexit__ também precisa ser um método assíncrono
+    mock_client_context.__aexit__ = AsyncMock(return_value=None)
+
+    mocker.patch("httpx.AsyncClient", return_value=mock_client_context)
+
+    # Act
+    await send_webhook_notification(TEST_EVENT_TYPE_WEBHOOK, TEST_TASK_DATA_FOR_WEBHOOK)
+
+    # Assert
+    mock_utils_logger.exception.assert_called_once()
+    # (O resto das suas asserções)
+    exception_log_message = mock_utils_logger.exception.call_args[0][0]
+    assert "Erro inesperado ao enviar webhook para" in exception_log_message
+    assert "Erro genérico simulado no post" in exception_log_message # Verifique a mensagem do side_effect
+    print("  Sucesso: Exceção genérica inesperada durante o envio tratada e logada com logger.exception.")
+
+@respx.mock
+async def test_send_webhook_handles_timeout_exception(mocker):
+    """
+    Testa o tratamento de erro quando ocorre um httpx.TimeoutException
+    ao tentar enviar a notificação de webhook.
+
+    Verifica se um erro apropriado é logado.
+    """
+    print("\nTeste: send_webhook_notification - Tratamento de httpx.TimeoutException.")
+    # Arrange: Mockar a rota HTTP para levantar uma TimeoutException.
+    # A TimeoutException geralmente precisa de um contexto de request para ser construída,
+    # mas o respx pode simular o efeito.
+    # Uma forma simples é fazer o side_effect levantar TimeoutException.
+    # O construtor de TimeoutException aceita uma mensagem e um request.
+    # Para simplificar no mock, podemos apenas levantar a exceção com uma mensagem.
+    simulated_timeout_message = "Simulated timeout durante o envio do webhook"
+    # Precisamos da instância do request para o construtor do TimeoutException.
+    # Como não temos uma instância real do request aqui antes do mock, podemos criar um dummy.
+    dummy_request_for_exception = httpx.Request(method="POST", url=TEST_WEBHOOK_TARGET_URL)
+    
+    respx.post(TEST_WEBHOOK_TARGET_URL).mock(
+        side_effect=httpx.TimeoutException(simulated_timeout_message, request=dummy_request_for_exception)
+    )
+    print(f"  Mock respx: Rota POST para '{TEST_WEBHOOK_TARGET_URL}' mockada para levantar httpx.TimeoutException.")
+    
+    mock_utils_logger = mocker.patch("app.core.utils.logger")
+    print("  Mock: app.core.utils.logger.")
+
+    # Act: Chamar a função.
+    print("  Atuando: Chamando send_webhook_notification (esperando timeout)...")
+    await send_webhook_notification(TEST_EVENT_TYPE_WEBHOOK, TEST_TASK_DATA_FOR_WEBHOOK)
+
+    # Assert: Verificar se logger.error foi chamado com a mensagem correta.
+    mock_utils_logger.error.assert_called_once()
+    error_log_args, _ = mock_utils_logger.error.call_args
+    error_log_message = error_log_args[0] 
+    print(f"  Log de erro capturado: {error_log_message}")
+
+    assert "Timeout ao enviar webhook para" in error_log_message, \
+        "Mensagem de log para TimeoutException não encontrada ou incorreta."
+    assert TEST_WEBHOOK_TARGET_URL in error_log_message, \
+        "URL não encontrada na mensagem de log de timeout."
+    # A mensagem da TimeoutException original (simulated_timeout_message) NÃO é incluída
+    # na f-string do logger.error, então não precisamos verificá-la lá.
+
+    print("  Sucesso: httpx.TimeoutException tratado e logado corretamente.")
