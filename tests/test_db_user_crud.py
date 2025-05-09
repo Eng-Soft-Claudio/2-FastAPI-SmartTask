@@ -56,9 +56,7 @@ def sample_user_in_db() -> UserInDB:
 # =======================================
 async def test_get_user_by_id_success(mocker, mock_db_connection, sample_user_in_db): # type: ignore
     """Testa busca de usuário por ID com sucesso."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = sample_user_in_db.id
     user_dict_from_db = sample_user_in_db.model_dump(mode="json")
     user_dict_from_db['_id'] = "mock_mongo_id"
@@ -69,44 +67,32 @@ async def test_get_user_by_id_success(mocker, mock_db_connection, sample_user_in
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_validate = mocker.patch("app.db.user_crud.UserInDB.model_validate", return_value=sample_user_in_db)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_id(db=mock_db_connection, user_id=test_user_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == sample_user_in_db
     mock_collection.find_one.assert_awaited_once_with({"id": str(test_user_id)})
     mock_validate.assert_called_once_with(expected_validation_dict)
 
 async def test_get_user_by_id_not_found(mocker, mock_db_connection): # type: ignore
     """Testa busca de usuário por ID quando não encontrado."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     mock_collection = AsyncMock()
     mock_collection.find_one.return_value = None
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_id(db=mock_db_connection, user_id=test_user_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one.assert_awaited_once_with({"id": str(test_user_id)})
 
 async def test_get_user_by_id_validation_error(mocker, mock_db_connection): # type: ignore
     """Testa falha de validação Pydantic ao buscar usuário por ID."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     invalid_user_dict_from_db = {"_id": "mongo_id", "id": str(test_user_id), "campo_errado": True}
     expected_validation_dict = {"id": str(test_user_id), "campo_errado": True}
@@ -119,14 +105,10 @@ async def test_get_user_by_id_validation_error(mocker, mock_db_connection): # ty
     mock_validate = mocker.patch("app.db.user_crud.UserInDB.model_validate", side_effect=simulated_error)
     mock_logger_error = mocker.patch("app.db.user_crud.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_id(db=mock_db_connection, user_id=test_user_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one.assert_awaited_once_with({"id": str(test_user_id)})
     mock_validate.assert_called_once_with(expected_validation_dict)
@@ -138,9 +120,7 @@ async def test_get_user_by_id_validation_error(mocker, mock_db_connection): # ty
 # ===========================================
 async def test_get_user_by_username_success(mocker, mock_db_connection, sample_user_in_db): # type: ignore
     """Testa busca de usuário por username com sucesso."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_username = sample_user_in_db.username
     user_dict_from_db = sample_user_in_db.model_dump(mode="json")
     user_dict_from_db['_id'] = "mock_mongo_id"
@@ -151,44 +131,32 @@ async def test_get_user_by_username_success(mocker, mock_db_connection, sample_u
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_validate = mocker.patch("app.db.user_crud.UserInDB.model_validate", return_value=sample_user_in_db)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_username(db=mock_db_connection, username=test_username)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == sample_user_in_db
     mock_collection.find_one.assert_awaited_once_with({"username": test_username})
     mock_validate.assert_called_once_with(expected_validation_dict)
 
 async def test_get_user_by_username_not_found(mocker, mock_db_connection): # type: ignore
     """Testa busca de usuário por username quando não encontrado."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_username = "nouser_username"
     mock_collection = AsyncMock()
     mock_collection.find_one.return_value = None
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_username(db=mock_db_connection, username=test_username)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one.assert_awaited_once_with({"username": test_username})
 
 async def test_get_user_by_username_validation_error(mocker, mock_db_connection): # type: ignore
     """Testa falha de validação Pydantic ao buscar usuário por username."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_username = "invalid_user_validate"
     invalid_user_dict_from_db = {"_id": "mongo_id", "username": test_username, "campo_errado": True}
     expected_validation_dict = {"username": test_username, "campo_errado": True}
@@ -201,14 +169,10 @@ async def test_get_user_by_username_validation_error(mocker, mock_db_connection)
     mock_validate = mocker.patch("app.db.user_crud.UserInDB.model_validate", side_effect=simulated_error)
     mock_logger_error = mocker.patch("app.db.user_crud.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_username(db=mock_db_connection, username=test_username)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one.assert_awaited_once_with({"username": test_username})
     mock_validate.assert_called_once_with(expected_validation_dict)
@@ -220,9 +184,7 @@ async def test_get_user_by_username_validation_error(mocker, mock_db_connection)
 # ===========================================
 async def test_get_user_by_email_success(mocker, mock_db_connection, sample_user_in_db): # type: ignore
     """Testa busca de usuário por email com sucesso."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_email = sample_user_in_db.email
     user_dict_from_db = sample_user_in_db.model_dump(mode="json")
     user_dict_from_db['_id'] = "mock_mongo_id"
@@ -233,44 +195,32 @@ async def test_get_user_by_email_success(mocker, mock_db_connection, sample_user
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_validate = mocker.patch("app.db.user_crud.UserInDB.model_validate", return_value=sample_user_in_db)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_email(db=mock_db_connection, email=test_email)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == sample_user_in_db
     mock_collection.find_one.assert_awaited_once_with({"email": test_email})
     mock_validate.assert_called_once_with(expected_validation_dict)
 
 async def test_get_user_by_email_not_found(mocker, mock_db_connection): # type: ignore
     """Testa busca de usuário por email quando não encontrado."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_email = "nouser@example.com"
     mock_collection = AsyncMock()
     mock_collection.find_one.return_value = None
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_email(db=mock_db_connection, email=test_email)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one.assert_awaited_once_with({"email": test_email})
 
 async def test_get_user_by_email_validation_error(mocker, mock_db_connection): # type: ignore
     """Testa falha de validação Pydantic ao buscar usuário por email."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_email = "invalid_validate@example.com"
     invalid_user_dict_from_db = {"_id": "mongo_id", "email": test_email, "campo_errado": True}
     expected_validation_dict = {"email": test_email, "campo_errado": True}
@@ -283,14 +233,10 @@ async def test_get_user_by_email_validation_error(mocker, mock_db_connection): #
     mock_validate = mocker.patch("app.db.user_crud.UserInDB.model_validate", side_effect=simulated_error)
     mock_logger_error = mocker.patch("app.db.user_crud.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.get_user_by_email(db=mock_db_connection, email=test_email)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one.assert_awaited_once_with({"email": test_email})
     mock_validate.assert_called_once_with(expected_validation_dict)
@@ -302,9 +248,7 @@ async def test_get_user_by_email_validation_error(mocker, mock_db_connection): #
 # =======================================
 async def test_create_user_success(mocker, mock_db_connection, sample_user_create): # type: ignore
     """Testa a criação de usuário com sucesso."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_uuid = uuid.uuid4()
     test_datetime = datetime.now(timezone.utc)
     mock_uuid_module = mocker.patch("app.db.user_crud.uuid")
@@ -348,14 +292,10 @@ async def test_create_user_success(mocker, mock_db_connection, sample_user_creat
     mock_collection.insert_one.return_value = mock_insert_result
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.create_user(db=mock_db_connection, user_in=sample_user_create)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == mock_validated_user_obj
 
     user_crud.get_password_hash.assert_called_once_with(sample_user_create.password)
@@ -366,9 +306,7 @@ async def test_create_user_success(mocker, mock_db_connection, sample_user_creat
 
 async def test_create_user_raises_duplicate_key_error(mocker, mock_db_connection, sample_user_create): # type: ignore
     """Testa se DuplicateKeyError é relançado."""
-    # ========================
     # --- Arrange ---
-    # ========================
     mocker.patch("app.db.user_crud.get_password_hash", return_value="mock_hash")
     mock_validated_obj = MagicMock()
     mock_validated_obj.model_dump.return_value = {"some": "data"}
@@ -380,9 +318,7 @@ async def test_create_user_raises_duplicate_key_error(mocker, mock_db_connection
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_warning = mocker.patch("app.db.user_crud.logger.warning")
 
-    # ========================
     # --- Act & Assert ---
-    # ========================
     with pytest.raises(DuplicateKeyError):
         await user_crud.create_user(db=mock_db_connection, user_in=sample_user_create)
 
@@ -394,9 +330,7 @@ async def test_create_user_pydantic_validation_failure(mocker): # type: ignore
     Testa se create_user retorna None e loga um erro quando
     UserInDB.model_validate(user_db_data) falha.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     valid_user_create_input = UserCreate(
         email="test_pydantic_fail@example.com",
         username="test_pydantic_user_fail",
@@ -418,14 +352,10 @@ async def test_create_user_pydantic_validation_failure(mocker): # type: ignore
 
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.create_user(db=mock_db_connection, user_in=valid_user_create_input)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_model_validate.assert_called_once()
@@ -442,9 +372,7 @@ async def test_create_user_db_insert_not_acknowledged(mocker): # type: ignore
     Testa se create_user retorna None e loga erro quando a inserção
     no banco de dados não é confirmada (acknowledged=False).
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     valid_user_create_input = UserCreate(
         email="test_not_acknowledged@example.com",
         username="test_user_not_acknowledged",
@@ -470,14 +398,10 @@ async def test_create_user_db_insert_not_acknowledged(mocker): # type: ignore
 
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.create_user(db=mock_db_connection, user_in=valid_user_create_input)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_validate.assert_called_once()
@@ -501,9 +425,7 @@ async def test_create_user_handles_generic_db_exception_on_insert(mocker): # typ
     Testa se create_user retorna None e loga exceção quando
     insert_one levanta um erro genérico do banco de dados.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     valid_user_create_input = UserCreate(
         email="test_generic_db_exception@example.com",
         username="test_user_generic_exception",
@@ -527,14 +449,10 @@ async def test_create_user_handles_generic_db_exception_on_insert(mocker): # typ
 
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.create_user(db=mock_db_connection, user_in=valid_user_create_input)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_validate.assert_called_once()
@@ -553,9 +471,7 @@ async def test_create_user_handles_generic_db_exception_on_insert(mocker): # typ
 # =======================================
 async def test_update_user_success(mocker, mock_db_connection, sample_user_in_db): # type: ignore
     """Testa atualização de usuário com sucesso (sem alterar senha)."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = sample_user_in_db.id
     update_payload = UserUpdate(full_name="Novo Nome Completo", email="novo@email.com")
     fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
@@ -583,14 +499,10 @@ async def test_update_user_success(mocker, mock_db_connection, sample_user_in_db
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_validate_model = mocker.patch("app.db.user_crud.UserInDB.model_validate", return_value=expected_user_obj)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(db=mock_db_connection, user_id=test_user_id, user_update=update_payload)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == expected_user_obj
     mock_pwd_hash.assert_not_called()
 
@@ -611,9 +523,7 @@ async def test_update_user_success(mocker, mock_db_connection, sample_user_in_db
 
 async def test_update_user_with_password(mocker, mock_db_connection, sample_user_in_db): # type: ignore
     """Testa atualização de usuário incluindo a senha."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = sample_user_in_db.id
     new_password = "newSecurePassword123"
     new_hashed_password = "hashed_" + new_password
@@ -641,14 +551,10 @@ async def test_update_user_with_password(mocker, mock_db_connection, sample_user
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_validate_model = mocker.patch("app.db.user_crud.UserInDB.model_validate", return_value=expected_user_obj)
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(db=mock_db_connection, user_id=test_user_id, user_update=update_payload)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == expected_user_obj
     mock_pwd_hash.assert_called_once_with(new_password)
 
@@ -669,9 +575,7 @@ async def test_update_user_with_password(mocker, mock_db_connection, sample_user
 
 async def test_update_user_not_found(mocker, mock_db_connection): # type: ignore
     """Testa atualização de usuário quando find_one_and_update retorna None."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     update_payload = UserUpdate(full_name="Nome que nao sera atualizado")
     fixed_timestamp = datetime.now(timezone.utc)
@@ -685,14 +589,10 @@ async def test_update_user_not_found(mocker, mock_db_connection): # type: ignore
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_warning = mocker.patch("app.db.user_crud.logger.warning")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(db=mock_db_connection, user_id=test_user_id, user_update=update_payload)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_collection.find_one_and_update.assert_awaited_once()
@@ -706,9 +606,7 @@ async def test_update_user_not_found(mocker, mock_db_connection): # type: ignore
 
 async def test_update_user_raises_duplicate_key_error(mocker, mock_db_connection): # type: ignore
     """Testa se DuplicateKeyError em update é relançado."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     update_payload = UserUpdate(email="existing@duplicate.com")
     fixed_timestamp = datetime.now(timezone.utc)
@@ -724,9 +622,7 @@ async def test_update_user_raises_duplicate_key_error(mocker, mock_db_connection
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_warning = mocker.patch("app.db.user_crud.logger.warning")
 
-    # ========================
     # --- Act & Assert ---
-    # ========================
     with pytest.raises(DuplicateKeyError):
         await user_crud.update_user(db=mock_db_connection, user_id=test_user_id, user_update=update_payload)
 
@@ -739,9 +635,7 @@ async def test_update_user_raises_duplicate_key_error(mocker, mock_db_connection
 
 async def test_update_user_generic_exception(mocker, mock_db_connection): # type: ignore
     """Testa tratamento de exceção genérica em update."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     update_payload = UserUpdate(disabled=False)
     fixed_timestamp = datetime.now(timezone.utc)
@@ -756,14 +650,10 @@ async def test_update_user_generic_exception(mocker, mock_db_connection): # type
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_exception = mocker.patch("app.db.user_crud.logger.exception")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(db=mock_db_connection, user_id=test_user_id, user_update=update_payload)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_collection.find_one_and_update.assert_awaited_once()
@@ -780,9 +670,7 @@ async def test_update_user_empty_payload_updates_only_timestamp(mocker): # type:
     quando o payload de atualização resulta em nenhum dado a ser modificado,
     e valida se o usuário correto é retornado.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
 
@@ -815,18 +703,14 @@ async def test_update_user_empty_payload_updates_only_timestamp(mocker): # type:
 
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=empty_update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == final_validated_user_mock
 
     user_crud.get_password_hash.assert_not_called()
@@ -853,9 +737,7 @@ async def test_update_user_empty_payload_get_user_returns_none(mocker): # type: 
     Testa se update_user retorna None quando o payload de atualização
     está vazio e a busca inicial por get_user_by_id retorna None.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     empty_update_payload = UserUpdate(password=None)
 
@@ -873,18 +755,14 @@ async def test_update_user_empty_payload_get_user_returns_none(mocker): # type: 
 
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=empty_update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_pwd_hash.assert_not_called()
@@ -905,9 +783,7 @@ async def test_update_user_empty_payload_update_exception(mocker): # type: ignor
     Testa se update_user retorna None e loga exceção quando payload está vazio
     e a chamada a find_one_and_update (para updated_at) levanta erro.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
     empty_update_payload = UserUpdate(password=None)
@@ -930,18 +806,14 @@ async def test_update_user_empty_payload_update_exception(mocker): # type: ignor
     mock_logger_exception = mocker.patch("app.db.user_crud.logger.exception")
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=empty_update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_pwd_hash.assert_not_called()
@@ -960,9 +832,7 @@ async def test_update_user_empty_payload_validate_failure(mocker): # type: ignor
     Testa falha na validação Pydantic após find_one_and_update
     no branch de payload vazio, assumindo que find_one_and_update retornou um doc.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
     empty_update_payload = UserUpdate(password=None)
@@ -1004,18 +874,14 @@ async def test_update_user_empty_payload_validate_failure(mocker): # type: ignor
     mock_logger_error = mocker.patch("app.db.user_crud.logger.error") # Deve usar .exception agora
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=empty_update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     user_crud.get_password_hash.assert_not_called()
@@ -1038,9 +904,7 @@ async def test_update_user_main_path_validate_failure(mocker): # type: ignore
     Testa falha na validação Pydantic após find_one_and_update
     no caminho principal (quando update_data não está vazio).
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     update_payload = UserUpdate(full_name="Nome Atualizado")
     fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
@@ -1080,18 +944,14 @@ async def test_update_user_main_path_validate_failure(mocker): # type: ignore
     mock_logger_error = mocker.patch("app.db.user_crud.logger.error")
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_pwd_hash.assert_not_called()
@@ -1121,9 +981,7 @@ async def test_update_user_main_path_user_not_found(mocker, mock_db_connection):
     Testa se update_user retorna None e loga aviso quando o usuário
     não é encontrado por find_one_and_update no caminho principal.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     update_payload = UserUpdate(full_name="Nome Nao Atualizado")
     fixed_timestamp = datetime.now(timezone.utc)
@@ -1139,18 +997,14 @@ async def test_update_user_main_path_user_not_found(mocker, mock_db_connection):
     mock_validate_model = mocker.patch("app.db.user_crud.UserInDB.model_validate")
     mock_logger_warning = mocker.patch("app.db.user_crud.logger.warning")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_pwd_hash.assert_not_called()
@@ -1166,9 +1020,7 @@ async def test_update_user_main_path_raises_duplicate_key_error(mocker, mock_db_
     Testa se DuplicateKeyError é relançado por update_user
     no caminho principal e um aviso é logado.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     update_payload = UserUpdate(email="duplicate@test.com") 
     fixed_timestamp = datetime.now(timezone.utc)
@@ -1185,9 +1037,7 @@ async def test_update_user_main_path_raises_duplicate_key_error(mocker, mock_db_
     mock_validate_model = mocker.patch("app.db.user_crud.UserInDB.model_validate")
     mock_logger_warning = mocker.patch("app.db.user_crud.logger.warning")
 
-    # ========================
     # --- Act & Assert ---
-    # ========================
     with pytest.raises(DuplicateKeyError):
         await user_crud.update_user(
             db=mock_db_connection,
@@ -1212,9 +1062,7 @@ async def test_update_user_empty_payload_find_one_and_update_returns_none(mocker
     Testa se update_user retorna None quando payload está vazio,
     usuário existe, mas find_one_and_update (para updated_at) retorna None.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     fixed_timestamp = datetime.now(timezone.utc).replace(microsecond=0)
     empty_update_payload = UserUpdate(password=None)
@@ -1235,18 +1083,14 @@ async def test_update_user_empty_payload_find_one_and_update_returns_none(mocker
     mock_logger_exception = mocker.patch("app.db.user_crud.logger.exception")
     mock_db_connection = AsyncMock()
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.update_user(
         db=mock_db_connection,
         user_id=test_user_id,
         user_update=empty_update_payload
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
 
     mock_pwd_hash.assert_not_called()
@@ -1270,9 +1114,7 @@ async def test_update_user_empty_payload_find_one_and_update_returns_none(mocker
 # =======================================
 async def test_delete_user_success(mocker, mock_db_connection): # type: ignore
     """Testa deleção de usuário com sucesso."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
 
     mock_delete_result = MagicMock()
@@ -1283,23 +1125,17 @@ async def test_delete_user_success(mocker, mock_db_connection): # type: ignore
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_info = mocker.patch("app.db.user_crud.logger.info")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.delete_user(db=mock_db_connection, user_id=test_user_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is True
     mock_collection.delete_one.assert_awaited_once_with({"id": str(test_user_id)})
     mock_logger_info.assert_called_once_with(f"User {test_user_id} deleted successfully.")
 
 async def test_delete_user_not_found(mocker, mock_db_connection): # type: ignore
     """Testa deleção de usuário quando não encontrado."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
 
     mock_delete_result = MagicMock()
@@ -1310,14 +1146,10 @@ async def test_delete_user_not_found(mocker, mock_db_connection): # type: ignore
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_warning = mocker.patch("app.db.user_crud.logger.warning")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.delete_user(db=mock_db_connection, user_id=test_user_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is False
     mock_collection.delete_one.assert_awaited_once_with({"id": str(test_user_id)})
     mock_logger_warning.assert_called_once()
@@ -1326,9 +1158,7 @@ async def test_delete_user_not_found(mocker, mock_db_connection): # type: ignore
 
 async def test_delete_user_generic_exception(mocker, mock_db_connection): # type: ignore
     """Testa tratamento de exceção genérica em delete_user."""
-    # ========================
     # --- Arrange ---
-    # ========================
     test_user_id = uuid.uuid4()
     simulated_db_error = Exception("Generic delete error")
 
@@ -1337,14 +1167,10 @@ async def test_delete_user_generic_exception(mocker, mock_db_connection): # type
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_exception = mocker.patch("app.db.user_crud.logger.exception")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await user_crud.delete_user(db=mock_db_connection, user_id=test_user_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is False
     mock_collection.delete_one.assert_awaited_once_with({"id": str(test_user_id)})
     mock_logger_exception.assert_called_once()
@@ -1355,22 +1181,16 @@ async def test_delete_user_generic_exception(mocker, mock_db_connection): # type
 # ==============================================
 async def test_create_user_indexes_success(mocker, mock_db_connection): # type: ignore
     """Testa criação de índices com sucesso."""
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_collection = AsyncMock()
     mock_collection.create_index = AsyncMock()
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_info = mocker.patch("app.db.user_crud.logger.info")
 
-    # ========================
     # --- Act ---
-    # ========================
     await user_crud.create_user_indexes(db=mock_db_connection)
 
-    # ========================
     # --- Assert ---
-    # ========================
     expected_calls = [
         call("username", unique=True, name="username_unique_idx"),
         call("email", unique=True, name="email_unique_idx")
@@ -1382,23 +1202,17 @@ async def test_create_user_indexes_success(mocker, mock_db_connection): # type: 
 
 async def test_create_user_indexes_failure(mocker, mock_db_connection): # type: ignore
     """Testa tratamento de erro na criação de índices."""
-    # ========================
     # --- Arrange ---
-    # ========================
     simulated_index_error = Exception("Erro ao criar indice simulado")
     mock_collection = AsyncMock()
     mock_collection.create_index.side_effect = simulated_index_error
     mocker.patch("app.db.user_crud._get_users_collection", return_value=mock_collection)
     mock_logger_error = mocker.patch("app.db.user_crud.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     await user_crud.create_user_indexes(db=mock_db_connection)
 
-    # ========================
     # --- Assert ---
-    # ========================
     mock_collection.create_index.assert_awaited_once_with("username", unique=True, name="username_unique_idx")
     mock_logger_error.assert_called_once()
     call_args, call_kwargs = mock_logger_error.call_args

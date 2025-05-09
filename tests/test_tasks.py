@@ -201,9 +201,7 @@ async def test_create_task_explicit_nulls_optional(
     Espera-se que a tarefa seja criada com sucesso (HTTP 201) e que esses campos
     reflitam o valor nulo na resposta.
     """
-    # ========================
         # --- Arrange ---
-    # ========================
     payload = base_task_create_data.copy()
     payload["description"] = None
     payload["due_date"] = None
@@ -211,14 +209,10 @@ async def test_create_task_explicit_nulls_optional(
     payload["project"] = None
     url = f"{settings.API_V1_STR}/tasks/"
 
-    # ========================
     # --- Act ---
-    # ========================
     response = await test_async_client.post(url, json=payload, headers=auth_headers_a)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert response.status_code == status.HTTP_201_CREATED
     response_data = response.json()
     assert response_data["description"] is None
@@ -237,9 +231,7 @@ async def test_update_task_explicit_nulls_optional(
     Espera-se que a atualização seja bem-sucedida (HTTP 200) e os campos
     sejam refletidos como nulos na resposta.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     url_create = f"{settings.API_V1_STR}/tasks/"
     create_payload = {
         **base_task_create_data,
@@ -252,9 +244,7 @@ async def test_update_task_explicit_nulls_optional(
     assert create_resp.status_code == status.HTTP_201_CREATED
     task_id = create_resp.json()["id"]
 
-    # ========================
     # --- Act ---
-    # ========================
     url_put = f"{settings.API_V1_STR}/tasks/{task_id}"
     update_payload = {
         "description": None,
@@ -264,9 +254,7 @@ async def test_update_task_explicit_nulls_optional(
     }
     response = await test_async_client.put(url_put, json=update_payload, headers=auth_headers_a)
     
-    # ========================
     # --- Assert ---
-    # ========================
     assert response.status_code == status.HTTP_200_OK
     response_data = response.json()
     assert response_data["description"] is None
@@ -280,9 +268,7 @@ async def test_create_task_internal_validation_error(test_async_client: AsyncCli
     Testa o tratamento de erro quando a validação Pydantic interna
     ao construir o objeto Task completo na rota falha.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     url = f"{settings.API_V1_STR}/tasks/"
     task_payload = sample_task_create_data
 
@@ -293,14 +279,10 @@ async def test_create_task_internal_validation_error(test_async_client: AsyncCli
     mock_crud_create = mocker.patch("app.routers.tasks.task_crud.create_task")
     mock_logger_error = mocker.patch("app.routers.tasks.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     response = await test_async_client.post(url, json=task_payload, headers=auth_headers_a)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
     assert "Erro interno na validação dos dados da tarefa" in response.json()["detail"]
     mock_task_init.assert_called_once()
@@ -315,9 +297,7 @@ async def test_update_task_crud_returns_none(test_async_client: AsyncClient, moc
     Testa o comportamento da rota PUT /tasks/{task_id} quando
     task_crud.update_task retorna None.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     token, user_id_a = test_user_a_token_and_id
     target_task_id = uuid.uuid4()
     url = f"{settings.API_V1_STR}/tasks/{target_task_id}"
@@ -330,14 +310,10 @@ async def test_update_task_crud_returns_none(test_async_client: AsyncClient, moc
     mocker.patch("app.routers.tasks.calculate_priority_score")
     mock_logger_error = mocker.patch("app.routers.tasks.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     response = await test_async_client.put(url, json=update_payload, headers=auth_headers_a)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert response.status_code == status.HTTP_404_NOT_FOUND
     assert "Não foi possível atualizar a tarefa" in response.json()["detail"]
     assert "Pode ter sido deletada ou ocorreu um erro interno" in response.json()["detail"]
@@ -352,9 +328,7 @@ async def test_create_urgent_task_logs_warning_if_user_incomplete(test_async_cli
     Testa se um warning é logado ao criar tarefa urgente se o usuário
     não possui nome completo (mas tem e-mail).
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     username = f"incomplete_name_{uuid.uuid4().hex[:4]}"
     email = f"{username}@example.com"
     incomplete_user_data = {
@@ -398,14 +372,10 @@ async def test_create_urgent_task_logs_warning_if_user_incomplete(test_async_cli
     mocker.patch("app.routers.tasks.task_crud.create_task", return_value=mock_created_task)
     mocker.patch("app.routers.tasks.calculate_priority_score", return_value=1000.0)
 
-    # ========================
     # --- Act ---
-    # ========================
     response = await test_async_client.post(url_create, json=urgent_task_payload, headers=incomplete_user_headers)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert response.status_code == status.HTTP_201_CREATED
 
     mock_logger_warning.assert_called_once()

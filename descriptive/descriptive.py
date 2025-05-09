@@ -23,12 +23,12 @@ import sys
 PASTA_RAIZ_PROJETO = '/media/claudioh4x5w6l7/Desenvolvimento/SmartTask/'
 
 # Nome do arquivo de saída
-NOME_BASE_ARQUIVO_SAIDA = 'livro_codigo_python.txt'
+NOME_BASE_ARQUIVO_SAIDA = 'Codigo_Fonte.txt'
 
 # Diretórios a serem ignorados durante a varredura
 PASTAS_IGNORADAS = (
-    'venv', '__pycache__', 'descriptive', '.pytest_cache',
-    '.git', '.idea', 'node_modules', '.env'
+    '.venv', '__pycache__', 'descriptive', '.pytest_cache',
+    '.git', '.idea', 'node_modules', '.env', 'venv'
 )
 
 # Caminho do diretório onde o script está localizado
@@ -115,7 +115,7 @@ def escrever_capa_e_sumario(arquivo, capitulos: list):
         capitulos (list): Lista de dicionários com os capítulos a serem escritos.
     """
     arquivo.write("=" * 80 + "\n")
-    arquivo.write("LIVRO DO CÓDIGO-FONTE DO PROJETO\n")
+    arquivo.write("CÓDIGO-FONTE DO PROJETO\n")
     arquivo.write("=" * 80 + "\n\n")
 
     arquivo.write("SUMÁRIO\n")

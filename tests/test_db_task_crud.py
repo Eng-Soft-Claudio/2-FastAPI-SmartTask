@@ -133,23 +133,17 @@ async def test_create_task_when_db_insert_not_acknowledged(valid_task_obj: Task)
     do MongoDB não é confirmada (`acknowledged = False`).
     Espera-se que a função retorne `None`.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_mongodb_collection = AsyncMock()
     mock_insert_operation_result = MagicMock()
     mock_insert_operation_result.acknowledged = False 
     mock_mongodb_collection.insert_one = AsyncMock(return_value=mock_insert_operation_result)
 
-    # ========================
     # --- Act ---
-    # ========================
     with patch("app.db.task_crud._get_tasks_collection", return_value=mock_mongodb_collection):
         created_task_result = await task_crud.create_task(db=MagicMock(), task_db=valid_task_obj)
 
-    # ========================
     # --- Assert ---
-    # ========================
     mock_mongodb_collection.insert_one.assert_awaited_once()
     assert created_task_result is None, "Deveria retornar None se a inserção não for acknowledged."
 
@@ -160,23 +154,17 @@ async def test_create_task_handles_db_exception_on_insert(valid_task_obj: Task, 
     levanta uma exceção (simulando um erro do banco de dados).
     Espera-se que a exceção seja capturada, logada, e que a função retorne `None`.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_mongodb_collection = AsyncMock()
     simulated_db_error = Exception("Erro de Simulação na Inserção no DB")
     mock_mongodb_collection.insert_one = AsyncMock(side_effect=simulated_db_error)
     mock_task_crud_logger = mocker.patch("app.db.task_crud.logger")
 
-    # ========================
     # --- Act ---
-    # ========================
     with patch("app.db.task_crud._get_tasks_collection", return_value=mock_mongodb_collection):
         created_task_result = await task_crud.create_task(db=MagicMock(), task_db=valid_task_obj)
 
-    # ========================
     # --- Assert ---
-    # ========================
     mock_mongodb_collection.insert_one.assert_awaited_once() 
     assert created_task_result is None, "Deveria retornar None em caso de exceção no DB."
     mock_task_crud_logger.exception.assert_called_once(), "logger.exception não foi chamado."
@@ -186,23 +174,17 @@ async def test_create_task_indexes_success(mocker):
     """
     Testa a criação bem-sucedida de todos os índices de tarefa.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_db_object = MagicMock()
     mock_collection = AsyncMock()
     mock_collection.create_index = AsyncMock() 
     mocker.patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection)
     mock_logger_info = mocker.patch("app.db.task_crud.logging.info")
 
-    # ========================
     # --- Act ---
-    # ========================
     await task_crud.create_task_indexes(db=mock_db_object)
 
-    # ========================
     # --- Assert ---
-    # ========================
     expected_calls = [
         call("id", unique=True, name="task_id_unique_idx"),
         call("owner_id", name="task_owner_idx"),
@@ -218,9 +200,7 @@ async def test_create_task_indexes_failure(mocker):
     """
     Testa o tratamento de erro durante a criação de um índice de tarefa.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_db_object = MagicMock()
     simulated_db_error = Exception("Erro simulado ao criar índice 'owner_id'")
     mock_collection = AsyncMock()
@@ -232,14 +212,10 @@ async def test_create_task_indexes_failure(mocker):
     mock_logger_error = mocker.patch("app.db.task_crud.logging.error")
     mock_logger_info = mocker.patch("app.db.task_crud.logging.info")
 
-    # ========================
     # --- Act ---
-    # ========================
     await task_crud.create_task_indexes(db=mock_db_object)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert mock_collection.create_index.await_count == 2
     first_call_args = mock_collection.create_index.await_args_list[0].args
     second_call_args = mock_collection.create_index.await_args_list[1].args
@@ -414,9 +390,7 @@ async def test_get_tasks_by_owner_with_all_filters_and_sorting(valid_task_obj: T
     task_dict_from_db_iter = valid_task_obj.model_dump(mode='json')
     task_dict_from_db_iter['_id'] = "id_for_sort_test"
 
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_motor_cursor = AsyncMock() 
     mock_motor_cursor.__aiter__.return_value = [task_dict_from_db_iter]
     mock_motor_cursor.skip = MagicMock(return_value=mock_motor_cursor)  
@@ -426,9 +400,7 @@ async def test_get_tasks_by_owner_with_all_filters_and_sorting(valid_task_obj: T
     mock_mongodb_collection.find = MagicMock(return_value=mock_motor_cursor) 
     
 
-    # ========================
     # --- Act ---
-    # ========================
     filter_status = TaskStatus.PENDING
     filter_project = "ProjetoX_Filtro"
     sort_field = "created_at"
@@ -456,9 +428,7 @@ async def test_get_tasks_by_owner_with_all_filters_and_sorting(valid_task_obj: T
         "project": filter_project
     }
 
-    # ========================
     # --- Assert ---
-    # ========================
     mock_mongodb_collection.find.assert_called_once_with(expected_query_with_filters)
     mock_motor_cursor.skip.assert_called_once_with(test_skip_val)
     mock_motor_cursor.limit.assert_called_once_with(test_limit_val)
@@ -473,9 +443,7 @@ async def test_get_tasks_by_owner_handles_validation_error_during_iteration(vali
     levanta uma `ValidationError` para um dos documentos durante a iteração do cursor.
     Espera-se que o erro seja logado, o item inválido seja pulado, e os itens válidos sejam retornados.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     target_owner_id = uuid.uuid4()
     simulated_db_error_on_find = Exception("Erro de Simulação de Conexão Perdida no Find")
     mock_collection_object = MagicMock()
@@ -483,15 +451,11 @@ async def test_get_tasks_by_owner_handles_validation_error_during_iteration(vali
     patch_get_collection = patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection_object)
     mock_task_crud_logger = mocker.patch("app.db.task_crud.logger")
 
-    # ========================
     # --- Act ---
-    # ========================
     with patch_get_collection: 
         retrieved_tasks_list = await task_crud.get_tasks_by_owner(db=MagicMock(), owner_id=target_owner_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert retrieved_tasks_list == [], "Deveria retornar lista vazia em caso de exceção no DB."
     mock_task_crud_logger.exception.assert_called_once(), "logger.exception não foi chamado."
     
@@ -508,24 +472,18 @@ async def test_get_tasks_by_owner_handles_general_db_exception(mocker):
     geral no banco de dados durante a operação `find` (ou iteração).
     Espera-se que a função retorne uma lista vazia e logue a exceção.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_collection = MagicMock()
     owner_id = uuid.uuid4()
     db_error = Exception("Simulated Find Error")
     mock_collection.find.side_effect = db_error
     mock_logger = mocker.patch("app.db.task_crud.logger")
 
-    # ========================
     # --- Act ---
-    # ========================
     with patch("app.db.task_crud._get_tasks_collection", return_value=mock_collection):
         tasks = await task_crud.get_tasks_by_owner(db=MagicMock(), owner_id=owner_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert tasks == []
     mock_logger.exception.assert_called_once()
     assert f"DB Error listing tasks for owner {owner_id}" in mock_logger.exception.call_args[0][0]
@@ -535,9 +493,7 @@ async def test_get_tasks_by_owner_generic_db_exception(mocker):
     """
     Testa get_tasks_by_owner quando ocorre uma exceção genérica do DB.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     owner_id = uuid.uuid4()
     simulated_db_error = Exception("Simulated DB Error during find/iteration")
     mock_db_object = MagicMock()
@@ -547,14 +503,10 @@ async def test_get_tasks_by_owner_generic_db_exception(mocker):
 
     mock_logger_exception = mocker.patch("app.db.task_crud.logger.exception")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await task_crud.get_tasks_by_owner(db=mock_db_object, owner_id=owner_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == []
     mock_collection.find.assert_called_once()
     mock_logger_exception.assert_called_once()
@@ -568,9 +520,7 @@ async def test_get_tasks_by_owner_validation_error_in_loop(mocker, sample_owner_
     Testa get_tasks_by_owner quando um item falha na validação Pydantic
     dentro do loop, mas outros são válidos (simulando iteração).
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     mock_db_object = MagicMock()
     owner_id = sample_owner_id
 
@@ -615,15 +565,10 @@ async def test_get_tasks_by_owner_validation_error_in_loop(mocker, sample_owner_
     mock_logger_error = mocker.patch("app.db.task_crud.logger.error")
     mock_logger_exception = mocker.patch("app.db.task_crud.logger.exception")
 
-    # ========================
     # --- Act ---
-    # ========================
-    # Chamar a função (que agora está substituída pelo mock_async_for)
     result = await task_crud.get_tasks_by_owner(db=mock_db_object, owner_id=owner_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert len(result) == 1
     assert result[0] == valid_task_obj
     mock_get_tasks_internal.assert_awaited_once_with(db=mock_db_object, owner_id=owner_id)
@@ -643,9 +588,7 @@ async def test_get_tasks_by_owner_validation_error_handling(caplog):
     de get_tasks_by_owner, verificando se o erro é logado e
     a lista resultante é vazia (ou contém apenas itens válidos).
     """
-      # ========================
     # --- Arrange ---
-    # ========================
     db_mock = MagicMock()
     collection_mock = MagicMock()
     db_mock.__getitem__.return_value = collection_mock
@@ -661,15 +604,11 @@ async def test_get_tasks_by_owner_validation_error_handling(caplog):
     owner_id = uuid.uuid4()
     
 
-    # ========================
     # --- Act ---
-    # ========================
     with patch("app.db.task_crud.logger.error") as mock_logger:
         result = await task_crud.get_tasks_by_owner(db_mock, owner_id)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result == []
     mock_logger.assert_called()
 
@@ -740,9 +679,7 @@ async def test_update_task_validation_error_post_db(mocker, sample_task_in_db):
     """
     Testa falha de validação Pydantic após find_one_and_update retornar dados.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_task_id = sample_task_in_db.id
     owner_id = sample_task_in_db.owner_id
     update_data = {"title": "Updated Title Valid", "status": TaskStatus.IN_PROGRESS.value}
@@ -776,9 +713,7 @@ async def test_update_task_validation_error_post_db(mocker, sample_task_in_db):
     )
     mock_logger_error = mocker.patch("app.db.task_crud.logger.error")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await task_crud.update_task(
         db=mock_db_object,
         task_id=test_task_id,
@@ -786,9 +721,7 @@ async def test_update_task_validation_error_post_db(mocker, sample_task_in_db):
         update_data=update_data.copy() 
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one_and_update.assert_awaited_once() 
 
@@ -815,9 +748,7 @@ async def test_update_task_generic_exception(mocker, sample_owner_id):
     """
     Testa update_task quando find_one_and_update levanta exceção genérica.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_task_id = uuid.uuid4()
     owner_id = sample_owner_id 
     update_data = {"title": "Tentativa de Update"}
@@ -832,9 +763,7 @@ async def test_update_task_generic_exception(mocker, sample_owner_id):
     mock_validate = mocker.patch("app.db.task_crud.Task.model_validate")
     mock_logger_exception = mocker.patch("app.db.task_crud.logger.exception")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await task_crud.update_task(
         db=mock_db_object,
         task_id=test_task_id,
@@ -842,9 +771,7 @@ async def test_update_task_generic_exception(mocker, sample_owner_id):
         update_data=update_data.copy()
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one_and_update.assert_awaited_once()
     find_one_update_args, find_one_update_kwargs = mock_collection.find_one_and_update.await_args
@@ -868,9 +795,7 @@ async def test_update_task_not_found_logs_warning(mocker, sample_owner_id):
     """
     Testa se update_task loga um aviso quando find_one_and_update retorna None.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_task_id = uuid.uuid4()
     owner_id = sample_owner_id
     update_data = {"title": "Nome Nao Sera Atualizado"}
@@ -884,9 +809,7 @@ async def test_update_task_not_found_logs_warning(mocker, sample_owner_id):
     mock_validate = mocker.patch("app.db.task_crud.Task.model_validate")
     mock_logger_warning = mocker.patch("app.db.task_crud.logger.warning")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await task_crud.update_task(
         db=mock_db_object,
         task_id=test_task_id,
@@ -894,9 +817,7 @@ async def test_update_task_not_found_logs_warning(mocker, sample_owner_id):
         update_data=update_data.copy()
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is None
     mock_collection.find_one_and_update.assert_awaited_once()
     find_one_update_args, find_one_update_kwargs = mock_collection.find_one_and_update.await_args
@@ -978,9 +899,7 @@ async def test_delete_task_generic_exception(mocker, sample_owner_id):
     """
     Testa delete_task quando delete_one levanta uma exceção genérica.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     test_task_id = uuid.uuid4()
     owner_id = sample_owner_id
     mock_db_object = MagicMock()
@@ -992,18 +911,14 @@ async def test_delete_task_generic_exception(mocker, sample_owner_id):
 
     mock_logger_exception = mocker.patch("app.db.task_crud.logger.exception")
 
-    # ========================
     # --- Act ---
-    # ========================
     result = await task_crud.delete_task(
         db=mock_db_object,
         task_id=test_task_id,
         owner_id=owner_id
     )
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert result is False 
     mock_collection.delete_one.assert_awaited_once_with({"id": str(test_task_id), "owner_id": str(owner_id)})
 

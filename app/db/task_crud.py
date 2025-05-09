@@ -19,15 +19,18 @@ from pydantic import ValidationError
 # --- Módulos da Aplicação ---
 from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus
 
-# ========================
+# =====================================
 # --- Configurações e Constantes ---
-# ========================
+# =====================================
+
 logger = logging.getLogger(__name__)
+
 TASKS_COLLECTION = "tasks"
 
-# ========================
+# =========================================
 # --- Funções Auxiliares (Internas) ---
-# ========================
+# =========================================
+
 def _get_tasks_collection(db: AsyncIOMotorDatabase) -> AsyncIOMotorCollection:
     """Retorna a coleção de tarefas do banco de dados."""
     return db[TASKS_COLLECTION]
@@ -52,9 +55,10 @@ def _parse_sort_params(sort_by: Optional[str], sort_order: str) -> Optional[List
         return [(sort_by, mongo_order)]
     return None
 
-# ========================
+# =======================================
 # --- Operações CRUD para Tarefas ---
-# ========================
+# =======================================
+
 async def create_task(db: AsyncIOMotorDatabase, task_db: Task) -> Optional[Task]:
     """
     Cria uma nova tarefa no banco de dados.
@@ -74,7 +78,7 @@ async def create_task(db: AsyncIOMotorDatabase, task_db: Task) -> Optional[Task]
         insert_result = await collection.insert_one(task_db_dict)
         if insert_result.acknowledged:
             return task_db
-        else: # pragma: no cover
+        else:
             logger.warning(f"Criação da tarefa para owner {task_db.owner_id} não foi reconhecida pelo DB (acknowledged=False).")
             return None
     except Exception as e:
@@ -141,7 +145,7 @@ async def get_tasks_by_owner(
     if status_filter:
         query["status"] = status_filter.value
     if due_before:
-        due_before_dt = datetime.combine(due_before, datetime.max.time(), tzinfo=timezone.utc) # Use max.time()
+        due_before_dt = datetime.combine(due_before, datetime.min.time(), tzinfo=timezone.utc)
         query["due_date"] = {"$lte": due_before_dt}
     if project_filter:
         query["project"] = project_filter
@@ -167,6 +171,7 @@ async def get_tasks_by_owner(
     except Exception as e:
         logger.exception(f"DB Error listing tasks for owner {owner_id}: {e}")
         return []
+
 
 async def update_task(
     db: AsyncIOMotorDatabase,
@@ -213,6 +218,7 @@ async def update_task(
         logger.exception(f"DB Error updating task {task_id} owner {owner_id}: {e}")
         return None
 
+
 async def delete_task(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uuid.UUID) -> bool:
     """
     Deleta uma tarefa específica pelo seu ID e pelo ID do proprietário.
@@ -233,9 +239,10 @@ async def delete_task(db: AsyncIOMotorDatabase, task_id: uuid.UUID, owner_id: uu
         logger.exception(f"DB Error deleting task {task_id} owner {owner_id}: {e}")
         return False
 
-# ========================
+# ===================================================
 # --- Criação de Índices do Banco de Dados ---
-# ========================
+# ===================================================
+
 async def create_task_indexes(db: AsyncIOMotorDatabase):
     """
     Cria os índices necessários na coleção de tarefas para otimizar consultas.
