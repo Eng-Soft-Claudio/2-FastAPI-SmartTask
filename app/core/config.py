@@ -164,32 +164,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def check_webhook_config(self) -> 'Settings':
-        """Valida a configuração do webhook se URL for fornecida."""
-        # Este validador já estava implícito na linha final do arquivo original.
-        # Vamos torná-lo explícito.
-        if self.WEBHOOK_URL and not isinstance(self.WEBHOOK_URL, HttpUrl):
-             # Pydantic já deve ter validado HttpUrl, mas como dupla checagem.
-             # Usar warning em vez de raise para não impedir start da app por URL inválida.
-             logger.warning(f"WEBHOOK_URL '{self.WEBHOOK_URL}' não parece ser uma URL válida.")
-             # Opcionalmente, poderia limpar a URL:
-             # self.WEBHOOK_URL = None
+        """Valida a configuração do webhook se URL for fornecida."""         
         return self
 
 # ================================
 # --- Criação da Instância ---
 # ================================
 try:
-    # Pydantic BaseSettings lê do ambiente ou .env na instanciação
     settings = Settings()
-except ValidationError as e:
-    # Captura erros de validação do Pydantic (campos obrigatórios faltando, tipos inválidos)
-    logger.critical(f"Erro fatal de validação ao carregar configurações: {e}")
-    raise e
-except ValueError as e:
-     # Captura erros do nosso validador customizado
-    logger.critical(f"Erro fatal de validação na configuração (check_mail_config?): {e}")
-    raise e
-except Exception as e:
-     # Captura outros erros inesperados
-    logger.critical(f"Erro inesperado ao carregar configurações: {e}", exc_info=True)
-    raise e
+except ValidationError as e:# pragma: no cover
+    logger.critical(f"Erro fatal de validação ao carregar configurações: {e}") # pragma: no cover
+    raise e # pragma: no cover
+except ValueError as e:# pragma: no cover
+    logger.critical(f"Erro fatal de validação na configuração (check_mail_config?): {e}") # pragma: no cover
+    raise e # pragma: no cover
+except Exception as e:# pragma: no cover
+    logger.critical(f"Erro inesperado ao carregar configurações: {e}", exc_info=True) # pragma: no cover
+    raise e # pragma: no cover

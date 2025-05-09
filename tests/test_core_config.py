@@ -13,7 +13,8 @@ from logging import config
 import os 
 from unittest.mock import patch 
 import pytest
-from pydantic import ValidationError 
+from pydantic import ValidationError
+import importlib
 
 # --- Módulo da Aplicação ---
 from app.core.config import Settings
@@ -84,7 +85,6 @@ def test_settings_mail_enabled_and_missing_credentials_fails_validation(monkeypa
         f"A mensagem de erro não contém '{expected_error_message_part}'. Erro: {str(exc_info.value)}"
     print("  Validação falhou como esperado.")
 
-
 def test_settings_mail_disabled_and_credentials_not_needed_passes_validation(monkeypatch):
     """
     Testa se a instanciação de `Settings` é bem-sucedida quando `MAIL_ENABLED`
@@ -143,7 +143,6 @@ def test_settings_mail_disabled_and_credentials_not_needed_passes_validation(mon
             f"Variáveis de ambiente configuradas: {dict(os.environ)}"
         )
     print("  Validação passou como esperado com MAIL_ENABLED=False.")
-
 
 def test_settings_mail_enabled_and_all_credentials_provided_passes_validation(monkeypatch):
     """
@@ -209,3 +208,17 @@ def test_settings_mail_enabled_and_all_credentials_provided_passes_validation(mo
         )
     print("  Validação passou como esperado com MAIL_ENABLED=True e todas credenciais de e-mail presentes.")
 
+def test_settings_missing_required_pydantic_field_fails(monkeypatch):
+    print("\nTeste: Campo Pydantic obrigatório ausente -> Deve falhar a validação.")
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False) # Ou MONGODB_URL
+    # Certifique-se que MONGODB_URL está definido se você está testando a falta de JWT_SECRET_KEY, etc.
+    monkeypatch.setenv("MONGODB_URL", "mongodb://localhost:27017/test_config_db")
+
+    # Definir MAIL_ENABLED como False para que check_mail_config não interfira
+    monkeypatch.setenv("MAIL_ENABLED", "False")
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings(_env_file=None)
+    
+    assert "JWT_SECRET_KEY" in str(exc_info.value).upper() or "FIELD REQUIRED" in str(exc_info.value).upper()
+    print(f"  Pydantic ValidationError capturada como esperado: {exc_info.value}")
