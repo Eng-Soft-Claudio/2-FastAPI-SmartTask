@@ -18,29 +18,28 @@ ao banco de dados ou funções de decodificação de token.
 # ========================
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch 
+from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi import HTTPException, status
 
 # --- Módulos da Aplicação ---
 from app.core.dependencies import (get_current_active_user, get_current_user,
-                                   oauth2_scheme)
+                                   oauth2_scheme) # oauth2_scheme não usado diretamente nos testes, mas mantido
 from app.models.token import TokenPayload
 from app.models.user import UserInDB
 
-# ====================================
+# ========================
 # --- Marcador Global de Teste ---
-# ====================================
+# ========================
 pytestmark = pytest.mark.asyncio
 
-# ========================================
+# ========================
 # --- Fixtures para Mocks Comuns ---
-# ========================================
+# ========================
 @pytest.fixture
 def mock_db() -> AsyncMock:
     """
     Fixture que retorna um `AsyncMock` para simular a dependência do banco de dados (`DbDep`).
-    Isso permite testar as funções de dependência sem uma conexão real com o banco.
     """
     return AsyncMock()
 
@@ -48,16 +47,15 @@ def mock_db() -> AsyncMock:
 def mock_valid_token_str() -> str:
     """
     Fixture que retorna uma string de token JWT mockada e válida.
-    O conteúdo real do token não importa aqui, pois `decode_token` será mockado.
     """
     return "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IkpvaG4gRG9lIiwiaWF0IjoxNTE2MjM5MDIyfQ.SflKxwRJSMeKKF2QT4fwpMeJf36POk6yJV_adQssw5c"
 
-# ===================================================
+# ========================
 # --- Testes para a dependência `get_current_user` ---
-# ===================================================
+# ========================
 async def test_get_current_user_success(
-    mock_db: AsyncMock, 
-    mock_valid_token_str: str 
+    mock_db: AsyncMock,
+    mock_valid_token_str: str
 ):
     """
     Testa o cenário de sucesso para `get_current_user`.
@@ -67,6 +65,7 @@ async def test_get_current_user_success(
     - `user_crud.get_user_by_id` é chamado com o ID do usuário do payload do token.
     - A função retorna o objeto `UserInDB` esperado.
     """
+    # --- Arrange ---
     test_user_id = uuid.uuid4()
     test_username = "test_active_user"
     expected_user_obj = UserInDB(
@@ -78,16 +77,14 @@ async def test_get_current_user_success(
         created_at=datetime.now(timezone.utc)
     )
     mock_token_payload = TokenPayload(sub=test_user_id, username=test_username)
-    
 
-    
     with patch("app.core.dependencies.decode_token", return_value=mock_token_payload) as mock_decode_jwt, \
          patch("app.core.dependencies.user_crud.get_user_by_id", return_value=expected_user_obj) as mock_get_user:
 
-       
+        # --- Act ---
         retrieved_user = await get_current_user(db=mock_db, token=mock_valid_token_str)
 
-        # --- Assert: Verificar chamadas e resultado ---
+        # --- Assert ---
         mock_decode_jwt.assert_called_once_with(mock_valid_token_str)
         mock_get_user.assert_awaited_once_with(db=mock_db, user_id=test_user_id)
         assert retrieved_user == expected_user_obj, "Usuário retornado não é o esperado."
@@ -95,7 +92,7 @@ async def test_get_current_user_success(
 
 async def test_get_current_user_invalid_or_expired_token(
     mock_db: AsyncMock,
-    mock_valid_token_str: str 
+    mock_valid_token_str: str
 ):
     """
     Testa `get_current_user` quando `decode_token` falha (retorna None),
@@ -105,14 +102,13 @@ async def test_get_current_user_invalid_or_expired_token(
     - Uma `HTTPException` com status 401 é levantada.
     - A mensagem de detalhe da exceção é a esperada.
     """
-
-    # --- Arrange: Mockar `decode_token` para simular falha na decodificação ---
+    # --- Arrange ---
     with patch("app.core.dependencies.decode_token", return_value=None) as mock_decode_jwt:
 
-        # --- Act & Assert: Chamar a dependência e verificar a exceção ---
+        # --- Act & Assert ---
         with pytest.raises(HTTPException) as exc_info:
             await get_current_user(db=mock_db, token=mock_valid_token_str)
-        
+
         assert exc_info.value.status_code == status.HTTP_401_UNAUTHORIZED, "Status code não é 401."
         assert "Não foi possível validar as credenciais" in exc_info.value.detail, \
             "Mensagem de detalhe da exceção não é a esperada."
@@ -132,14 +128,14 @@ async def test_get_current_user_user_not_found_in_db(
     - A mensagem de detalhe da exceção é a esperada.
     - `user_crud.get_user_by_id` é chamado.
     """
+    # --- Arrange ---
     test_user_id_not_in_db = uuid.uuid4()
     mock_token_payload = TokenPayload(sub=test_user_id_not_in_db, username="ghost_user")
 
-    # --- Arrange: Mockar `decode_token` para retornar um payload válido,
     with patch("app.core.dependencies.decode_token", return_value=mock_token_payload) as mock_decode_jwt, \
          patch("app.core.dependencies.user_crud.get_user_by_id", return_value=None) as mock_get_user:
-        
-        # --- Act & Assert: Chamar a dependência e verificar a exceção ---
+
+        # --- Act & Assert ---
         with pytest.raises(HTTPException) as exc_info:
             await get_current_user(db=mock_db, token=mock_valid_token_str)
 
@@ -149,10 +145,9 @@ async def test_get_current_user_user_not_found_in_db(
         mock_decode_jwt.assert_called_once_with(mock_valid_token_str)
         mock_get_user.assert_awaited_once_with(db=mock_db, user_id=test_user_id_not_in_db)
 
-# =========================================================
+# ========================
 # --- Testes para a dependência `get_current_active_user` ---
-# =========================================================
-
+# ========================
 async def test_get_current_active_user_when_user_is_disabled():
     """
     Testa `get_current_active_user` passando um objeto `UserInDB`
@@ -162,28 +157,20 @@ async def test_get_current_active_user_when_user_is_disabled():
     - Uma `HTTPException` com status 400 Bad Request é levantada.
     - A mensagem de detalhe da exceção indica "Usuário inativo".
     """
-    
-    # ========================
     # --- Arrange ---
-    # ========================
     disabled_user_mock = UserInDB(
         id=uuid.uuid4(),
         username="inactive_user",
         email="inactive@example.com",
         hashed_password="fake_hashed_password",
-        disabled=True, # Usuário está desativado.
+        disabled=True,
         created_at=datetime.now(timezone.utc)
     )
 
-    # ========================
-    # --- Act ---
-    # ========================
+    # --- Act & Assert ---
     with pytest.raises(HTTPException) as exc_info:
-        await get_current_active_user(current_user=disabled_user_mock) 
-    
-    # ========================
-    # --- Assert ---
-    # ========================
+        await get_current_active_user(current_user=disabled_user_mock)
+
     assert exc_info.value.status_code == status.HTTP_400_BAD_REQUEST, "Status code não é 400."
     assert "Usuário inativo" in exc_info.value.detail, "Mensagem de detalhe da exceção não é 'Usuário inativo'."
 
@@ -197,27 +184,20 @@ async def test_get_current_active_user_when_user_is_active():
     - A função retorna o mesmo objeto de usuário que foi passado.
     - Nenhuma exceção é levantada.
     """
-
-    # ========================
     # --- Arrange ---
-    # ========================
     active_user_mock = UserInDB(
         id=uuid.uuid4(),
         username="active_user",
         email="active_user@example.com",
         hashed_password="fake_hashed_password",
-        disabled=False, 
+        disabled=False,
         created_at=datetime.now(timezone.utc)
     )
 
-    # ========================
     # --- Act ---
-    # ========================
     returned_user = await get_current_active_user(current_user=active_user_mock)
 
-    # ========================
     # --- Assert ---
-    # ========================
     assert returned_user == active_user_mock, "Usuário ativo retornado não é o mesmo que foi passado."
 
 
@@ -225,26 +205,16 @@ async def test_get_current_user_invalid_sub_uuid_format(mock_db, mock_valid_toke
     """
     Testa get_current_user quando o 'sub' no token não é um UUID válido.
     """
-    # ========================
     # --- Arrange ---
-    # ========================
     invalid_sub_str = "not-a-uuid-at-all"
-    mock_payload_dict = {"sub": invalid_sub_str, "username": "invalidsubuser"}
-
-    # Mock decode_token para retornar o *dicionário* inválido
-    # Precisamos mockar `TokenPayload.model_validate` dentro de decode_token
-    # OU, mais simples, mockar diretamente `decode_token` para retornar algo
-    # que passe as primeiras checagens mas falhe no UUID().
-    # Vamos usar um MagicMock para simular o TokenPayload retornado por decode_token
+    # No seu código original, mock_payload_dict não era usado, mas sim mock_token_payload_obj
     mock_token_payload_obj = MagicMock()
     mock_token_payload_obj.sub = invalid_sub_str # O atributo 'sub' tem a string inválida
 
     mock_decode = mocker.patch("app.core.dependencies.decode_token", return_value=mock_token_payload_obj)
     mock_get_user = mocker.patch("app.core.dependencies.user_crud.get_user_by_id", new_callable=AsyncMock)
 
-    # ========================
     # --- Act & Assert ---
-    # ========================
     with pytest.raises(HTTPException) as exc_info:
         await get_current_user(db=mock_db, token=mock_valid_token_str)
 
