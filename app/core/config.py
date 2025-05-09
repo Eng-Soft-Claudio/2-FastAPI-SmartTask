@@ -1,59 +1,53 @@
 # app/core/config.py
+"""
+Configurações da aplicação lidas do ambiente usando Pydantic BaseSettings.
+Procura variáveis de ambiente ou variáveis em um arquivo .env.
+"""
 
 # ========================
 # --- Importações ---
 # ========================
 import os
 import logging
-from typing import Optional, List 
+from typing import Optional, List
 from pydantic_settings import BaseSettings
 from pydantic import EmailStr, Field, RedisDsn, ValidationError, model_validator, HttpUrl
 from dotenv import load_dotenv
 
-# ===============================
+# ========================
 # --- Configuração do Logger ---
-# ===============================
+# ========================
 logger = logging.getLogger(__name__)
 
-# ===============================
+# ========================
 # --- Carregamento do .env ---
-# ===============================
+# ========================
 # Define o caminho para o arquivo .env na raiz do projeto
 dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
 # Carrega as variáveis do arquivo .env para o ambiente, se o arquivo existir
 loaded = load_dotenv(dotenv_path=dotenv_path)
 
-# ======================================
+# ========================
 # --- Definição das Configurações ---
-# ======================================
+# ========================
 class Settings(BaseSettings):
     """
     Configurações da aplicação lidas do ambiente usando Pydantic BaseSettings.
-    Procura variáveis de ambiente ou variáveis em um arquivo .env.
-    Docs Pydantic Settings: https://docs.pydantic.dev/latest/concepts/pydantic_settings/
     """
-    # =========================
     # --- Config Gerais ---
-    # =========================
     PROJECT_NAME: str = Field("SmartTask API", description="Nome do Projeto")
     API_V1_STR: str = Field("/api/v1", description="Prefixo para a versão 1 da API")
 
-    # =============================
     # --- Configurações MongoDB ---
-    # =============================
     MONGODB_URL: str = Field(..., description="URL de conexão completa do MongoDB (obrigatória)")
     DATABASE_NAME: str = Field("smarttask_db", description="Nome do banco de dados MongoDB")
 
-    # ===========================
     # --- Configurações JWT ---
-    # ===========================
     JWT_SECRET_KEY: str = Field(..., description="Chave secreta forte para assinar tokens JWT (obrigatória)")
     JWT_ALGORITHM: str = Field("HS256", description="Algoritmo de assinatura JWT")
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(60 * 24 * 7, description="Validade do token de acesso em minutos (padrão: 7 dias)")
 
-    # =======================================
     # --- Configurações de Prioridade ---
-    # =======================================
     PRIORITY_WEIGHT_DUE_DATE: float = Field(
         100.0,
         description="Peso para o componente de prazo no cálculo de prioridade."
@@ -71,9 +65,7 @@ class Settings(BaseSettings):
         description="Pontuação (ou fator aditivo/multiplicativo) especial para tarefas atrasadas."
     )
 
-    # ==============================
     # --- Configuração Webhook ---
-    # ==============================
     WEBHOOK_URL: Optional[HttpUrl] = Field(
         default=None,
         description="URL opcional para enviar notificações de eventos de tarefas (webhooks)."
@@ -83,11 +75,9 @@ class Settings(BaseSettings):
         description="Segredo opcional usado para assinar payloads de webhook para verificação (HMAC-SHA256)."
     )
 
-    # ================================
     # --- Configurações de E-mail ---
-    # ================================
     MAIL_ENABLED: bool = Field(
-            default=False, 
+            default=False,
             description="Flag para habilitar/desabilitar envio de e-mails globalmente."
     )
     MAIL_USERNAME: Optional[str] = Field(default=None, description="Usuário do servidor SMTP.")
@@ -113,9 +103,7 @@ class Settings(BaseSettings):
     USE_CREDENTIALS: bool = Field(default=True, description="Usar credenciais (username/password) para SMTP.")
     VALIDATE_CERTS: bool = Field(default=True, description="Validar certificados SSL/TLS do servidor SMTP.")
 
-    # ==============================================
     # --- Configurações Adicionais Específicas ---
-    # ==============================================
     EMAIL_TEMPLATES_DIR: str = Field(default="app/email-templates/build", description="Diretório de templates de e-mail compilados.")
     EMAIL_URGENCY_THRESHOLD: float = Field(
         default=100.0,
@@ -123,36 +111,25 @@ class Settings(BaseSettings):
     )
     FRONTEND_URL: Optional[str] = Field(default=None, description="URL base do frontend para links no e-mail (se houver).")
 
-    # ==============================
     # --- Configuração Redis ---
-    # ==============================
     REDIS_URL: Optional[RedisDsn] = Field(
         default=None,
         description="URL de conexão do Redis para filas de tarefas (ARQ)."
     )
 
-    # ===============================
     # --- Configuração de Logging ---
-    # ===============================
     LOG_LEVEL: str = Field(default="INFO", description="Nível de log (DEBUG, INFO, WARNING, ERROR, CRITICAL)")
 
-    # ===================================
     # --- Configurações CORS ---
-    # ===================================
     # A conversão de string separada por vírgula para List[str] é feita automaticamente pelo Pydantic v2
     CORS_ALLOWED_ORIGINS: List[str] = Field(default=[], description="Lista de origens CORS permitidas (separadas por vírgula no .env)")
 
-
-    # ====================================================
     # --- Configuração do Modelo Pydantic BaseSettings ---
-    # ====================================================
     model_config = {
-        "case_sensitive": False, 
+        "case_sensitive": False,
     }
 
-    # ===============================
     # --- Validadores ---
-    # ===============================
     @model_validator(mode='after')
     def check_mail_config(self) -> 'Settings':
         """Valida se as credenciais de e-mail estão presentes quando habilitado."""
@@ -164,13 +141,20 @@ class Settings(BaseSettings):
 
     @model_validator(mode='after')
     def check_webhook_config(self) -> 'Settings':
-        """Valida a configuração do webhook se URL for fornecida."""         
+        """Validações adicionais para configuração do webhook, se necessário."""
+        # Exemplo de validação que poderia fazer sentido se a assinatura fosse obrigatória com URL:
+        # if self.WEBHOOK_URL and not self.WEBHOOK_SECRET:
+        #     logger.warning(
+        #         "WEBHOOK_URL está configurado, mas WEBHOOK_SECRET não está. "
+        #         "Webhooks não serão assinados, o que pode ser uma falha de segurança."
+        #     )
         return self
 
-# ================================
+# ========================
 # --- Criação da Instância ---
-# ================================
+# ========================
 try:
+    # Pydantic BaseSettings lê do ambiente ou .env na instanciação
     settings = Settings()
 except ValidationError as e:# pragma: no cover
     logger.critical(f"Erro fatal de validação ao carregar configurações: {e}") # pragma: no cover
