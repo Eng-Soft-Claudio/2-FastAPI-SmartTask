@@ -1,14 +1,14 @@
 # SmartTask API 🚀
 
 <!-- Badges -->
-[![Build Status](https://img.shields.io/github/actions/workflow/status/Eng-Soft-Claudio/SmartTask/ci.yml?style=for-the-badge)](https://github.com/Eng-Soft-Claudio/SmartTask/actions) <!-- Mantenha este se tiver CI no GitHub Actions, senão remova ou use placeholder -->
-[![Python Version](https://img.shields.io/badge/Python-3.10+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
-[![Framework](https://img.shields.io/badge/Framework-FastAPI-blue?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)
+[![CI](https://img.shields.io/github/actions/workflow/status/Eng-Soft-Claudio/SmartTask/ci.yml?branch=main&style=for-the-badge)](https://github.com/Eng-Soft-Claudio/SmartTask/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/Eng-Soft-Claudio/SmartTask?branch=main&style=for-the-badge)](https://codecov.io/gh/Eng-Soft-Claudio/SmartTask)  
+[![Python Version](https://img.shields.io/badge/Python-3.12%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
+[![Framework](https://img.shields.io/badge/Framework-FastAPI-blue.svg?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)  
 [![Issues](https://img.shields.io/github/issues/Eng-Soft-Claudio/SmartTask?style=for-the-badge&logo=github)](https://github.com/Eng-Soft-Claudio/SmartTask/issues)
 [![Pull Requests](https://img.shields.io/github/issues-pr/Eng-Soft-Claudio/SmartTask?style=for-the-badge&logo=github)](https://github.com/Eng-Soft-Claudio/SmartTask/pulls)
-<!-- Adicione um badge de coverage se configurar relatórios -->
-<!-- [![Coverage Status](https://img.shields.io/coveralls/github/Eng-Soft-Claudio/SmartTask?style=for-the-badge)](https://coveralls.io/github/Eng-Soft-Claudio/SmartTask) -->
+
 
 ## Visão Geral ✨
 
