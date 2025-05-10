@@ -15,13 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # --- Módulos da Aplicação ---
-from app.routers import tasks
-from app.routers import auth
+from app.routers import tasks, auth, health
 from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
 from app.db.user_crud import create_user_indexes
 from app.db.task_crud import create_task_indexes
-from app.core.config import Settings, settings # settings importado, Settings para type hint
-from app.core.logging_config import setup_logging # InterceptHandler não precisa ser importado aqui
+from app.core.config import Settings, settings 
+from app.core.logging_config import setup_logging 
 
 # ========================
 # --- Configuração de Logging ---
@@ -69,7 +68,7 @@ async def lifespan(app: FastAPI):
         logger.info("Encerrando ciclo de vida (conexão DB falhou no início).")
         return
 
-    app.state.db = db_connection # Armazena a conexão no estado da app
+    app.state.db = db_connection 
     logger.info("Conectado ao MongoDB.")
 
     try:
@@ -119,6 +118,7 @@ _setup_cors_middleware(app, settings)
 # ========================
 app.include_router(auth.router, prefix=settings.API_V1_STR + "/auth", tags=["Authentication"])
 app.include_router(tasks.router, prefix=settings.API_V1_STR, tags=["Tasks"])
+app.include_router(health.router)
 
 # ========================
 # --- Endpoint Raiz ---

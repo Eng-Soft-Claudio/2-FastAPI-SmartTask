@@ -41,19 +41,14 @@ def test_settings_mail_enabled_and_missing_credentials_fails_validation(monkeypa
     monkeypatch.delenv("MAIL_FROM", raising=False)
     monkeypatch.delenv("MAIL_PORT", raising=False)
     monkeypatch.delenv("MAIL_SERVER", raising=False)
-    # No seu original, MAIL_TLS e MAIL_SSL eram `deprecated="auto"` ou removidos aqui, vou seguir
-    # como estava no último código que me forneceu
-    monkeypatch.delenv("MAIL_STARTTLS", raising=False) # Presumindo que você quis dizer MAIL_STARTTLS (TLS original é ambíguo)
-    monkeypatch.delenv("MAIL_SSL_TLS", raising=False)  # Presumindo que você quis dizer MAIL_SSL_TLS
+    monkeypatch.delenv("MAIL_STARTTLS", raising=False) 
+    monkeypatch.delenv("MAIL_SSL_TLS", raising=False)  
 
     print("  Definindo variáveis de ambiente obrigatórias (não-email)...")
     monkeypatch.setenv("PROJECT_NAME", "Test Project")
     monkeypatch.setenv("API_V1_STR", "/api/v1")
-    # 'ENVIRONMENT' e 'REFRESH_TOKEN_EXPIRE_DAYS' não estão em Settings, mas mantendo se estavam no seu teste
-    # monkeypatch.setenv("ENVIRONMENT", "test") # Removido se não presente em Settings
     monkeypatch.setenv("JWT_SECRET_KEY", "test_jwt_secret_key_for_config_test")
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30")
-    # monkeypatch.setenv("REFRESH_TOKEN_EXPIRE_DAYS", "7") # Removido se não presente em Settings
     monkeypatch.setenv("MONGODB_URL", "mongodb://localhost:27017/test_config_db")
     monkeypatch.setenv("DATABASE_NAME", "test_config_db")
 
@@ -63,7 +58,7 @@ def test_settings_mail_enabled_and_missing_credentials_fails_validation(monkeypa
     monkeypatch.setenv("MAIL_FROM", "tests@example.com")
     monkeypatch.setenv("MAIL_SERVER", "smtp.example.com")
     monkeypatch.setenv("MAIL_PORT", "587")
-    monkeypatch.setenv("MAIL_STARTTLS", "True") # Se for o nome correto da setting
+    monkeypatch.setenv("MAIL_STARTTLS", "True") 
 
     # --- Act & Assert: Tentar instanciar Settings e verificar a exceção ---
     print("  Tentando instanciar Settings, esperando exceção...")
@@ -95,16 +90,14 @@ def test_settings_mail_disabled_and_credentials_not_needed_passes_validation(mon
     monkeypatch.delenv("MAIL_FROM", raising=False)
     monkeypatch.delenv("MAIL_PORT", raising=False)
     monkeypatch.delenv("MAIL_SERVER", raising=False)
-    monkeypatch.delenv("MAIL_STARTTLS", raising=False) # Mantendo consistência com nomes de settings
-    monkeypatch.delenv("MAIL_SSL_TLS", raising=False)  # Mantendo consistência
+    monkeypatch.delenv("MAIL_STARTTLS", raising=False) 
+    monkeypatch.delenv("MAIL_SSL_TLS", raising=False)  
 
     print("  Definindo variáveis de ambiente obrigatórias (não-email)...")
     monkeypatch.setenv("PROJECT_NAME", "Test Project Disabled Mail")
     monkeypatch.setenv("API_V1_STR", "/api/v1")
-    # monkeypatch.setenv("ENVIRONMENT", "test") # Removido se não usado em Settings
     monkeypatch.setenv("JWT_SECRET_KEY", "test_jwt_secret_for_disabled_mail")
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
-    # monkeypatch.setenv("REFRESH_TOKEN_EXPIRE_DAYS", "14") # Removido se não usado em Settings
     monkeypatch.setenv("MONGODB_URL", "mongodb://localhost:27017/test_disabled_mail_db")
     monkeypatch.setenv("DATABASE_NAME", "test_disabled_mail_db")
 
@@ -145,16 +138,13 @@ def test_settings_mail_enabled_and_all_credentials_provided_passes_validation(mo
     monkeypatch.delenv("MAIL_FROM", raising=False)
     monkeypatch.delenv("MAIL_PORT", raising=False)
     monkeypatch.delenv("MAIL_SERVER", raising=False)
-    monkeypatch.delenv("MAIL_STARTTLS", raising=False) # Mantendo consistência
-    monkeypatch.delenv("MAIL_SSL_TLS", raising=False)  # Mantendo consistência
+    monkeypatch.delenv("MAIL_STARTTLS", raising=False) 
 
     print("  Definindo variáveis de ambiente obrigatórias (não-email)...")
     monkeypatch.setenv("PROJECT_NAME", "Test Project All Mail")
     monkeypatch.setenv("API_V1_STR", "/api/v1")
-    # monkeypatch.setenv("ENVIRONMENT", "test") # Removido se não usado em Settings
     monkeypatch.setenv("JWT_SECRET_KEY", "test_jwt_secret_for_all_mail")
     monkeypatch.setenv("ACCESS_TOKEN_EXPIRE_MINUTES", "15")
-    # monkeypatch.setenv("REFRESH_TOKEN_EXPIRE_DAYS", "3") # Removido se não usado em Settings
     monkeypatch.setenv("MONGODB_URL", "mongodb://localhost:27017/test_all_mail_db")
     monkeypatch.setenv("DATABASE_NAME", "test_all_mail_db")
 
@@ -165,8 +155,8 @@ def test_settings_mail_enabled_and_all_credentials_provided_passes_validation(mo
     monkeypatch.setenv("MAIL_FROM", "noreply_tests@example.com")
     monkeypatch.setenv("MAIL_SERVER", "smtp.mailservice.example.com")
     monkeypatch.setenv("MAIL_PORT", "465")
-    monkeypatch.setenv("MAIL_SSL_TLS", "True") # Usando MAIL_SSL_TLS para SSL
-    monkeypatch.setenv("MAIL_STARTTLS", "False") # Desabilitando STARTTLS se SSL_TLS é True
+    monkeypatch.setenv("MAIL_SSL_TLS", "True") 
+    monkeypatch.setenv("MAIL_STARTTLS", "False") 
 
     # --- Act & Assert: Tentar instanciar Settings e verificar se NÃO levanta exceção ---
     print("  Tentando instanciar Settings, esperando sucesso...")
@@ -192,9 +182,9 @@ def test_settings_missing_required_pydantic_field_fails(monkeypatch):
     Testa se `Settings` falha se um campo Pydantic obrigatório (não email) falta.
     """
     print("\nTeste: Campo Pydantic obrigatório ausente -> Deve falhar a validação.")
-    monkeypatch.delenv("JWT_SECRET_KEY", raising=False) # Removendo campo obrigatório
-    monkeypatch.setenv("MONGODB_URL", "mongodb://localhost:27017/test_config_db") # Mantendo outro obrigatório
-    monkeypatch.setenv("MAIL_ENABLED", "False") # Desabilitar checagem de email
+    monkeypatch.delenv("JWT_SECRET_KEY", raising=False) 
+    monkeypatch.setenv("MONGODB_URL", "mongodb://localhost:27017/test_config_db") 
+    monkeypatch.setenv("MAIL_ENABLED", "False") 
 
     with pytest.raises(ValidationError) as exc_info:
         Settings(_env_file=None)

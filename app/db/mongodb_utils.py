@@ -101,3 +101,28 @@ def get_database() -> AsyncIOMotorDatabase:
         logger.error("Tentativa de obter instância do DB antes da inicialização!")
         raise RuntimeError("A conexão com o banco de dados não foi inicializada.")
     return db_instance
+
+# ========================
+# --- Função de Acesso ao DB ---
+# ========================
+async def check_mongo_connection():
+    """
+    Verifica a conectividade com o banco de dados MongoDB.
+
+    Tenta realizar uma operação simples de "ping" no MongoDB para garantir que
+    a conexão com o banco de dados está ativa e funcionando corretamente.
+
+    Retorna:
+        bool: Retorna True se a conexão com o MongoDB for bem-sucedida, 
+              caso contrário, retorna False.
+
+    Exceções:
+        Caso ocorra algum erro na conexão ou no comando, retorna False.
+    """
+    try:
+        # Tente uma consulta simples ao MongoDB
+        db = await connect_to_mongo()
+        await db.command("ping")
+        return True
+    except Exception as e:
+        return False

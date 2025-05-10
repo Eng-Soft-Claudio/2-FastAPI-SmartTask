@@ -5,7 +5,7 @@
 # ========================
 import pytest
 from unittest.mock import AsyncMock, MagicMock, call, patch
-from app.db import mongodb_utils # Importa o módulo para mockar e chamar
+from app.db import mongodb_utils 
 
 # ========================
 # --- Testes para get_database ---
@@ -18,10 +18,11 @@ def test_get_database_not_initialized(mocker):
     mocker.patch("app.db.mongodb_utils.db_instance", None)
     mock_logger_error = mocker.patch("app.db.mongodb_utils.logger.error")
 
-    # --- Act & Assert ---
+    # --- Act ---
     with pytest.raises(RuntimeError) as excinfo:
         mongodb_utils.get_database()
 
+    # --- Assert ---
     assert "A conexão com o banco de dados não foi inicializada" in str(excinfo.value)
     mock_logger_error.assert_called_once_with("Tentativa de obter instância do DB antes da inicialização!")
 
@@ -44,7 +45,6 @@ async def test_close_mongo_connection_no_client(mocker):
     # --- Assert ---
     mock_logger_info.assert_any_call("Tentando fechar conexão com MongoDB...")
     mock_logger_warning.assert_called_once_with("Tentativa de fechar conexão com MongoDB, mas cliente não estava inicializado.")
-    # Verifica se o log de "conexão fechada" NÃO foi chamado
     log_info_calls = [c.args[0] for c in mock_logger_info.call_args_list if c.args]
     assert "Conexão com MongoDB fechada." not in log_info_calls
 
@@ -81,7 +81,6 @@ async def test_connect_to_mongo_failure_client_init(mocker):
     mocker.patch("motor.motor_asyncio.AsyncIOMotorClient", side_effect=simulated_error)
     mock_logger_error = mocker.patch("app.db.mongodb_utils.logger.error")
     mocker.patch("app.db.mongodb_utils.settings.MONGODB_URL", "mongodb://dummy_url")
-    # Garante que os globais estejam resetados para o teste
     mocker.patch("app.db.mongodb_utils.db_client", None)
     mocker.patch("app.db.mongodb_utils.db_instance", None)
 
@@ -95,8 +94,8 @@ async def test_connect_to_mongo_failure_client_init(mocker):
     assert "Não foi possível conectar ao MongoDB" in log_args[0]
     assert str(simulated_error) in log_args[0]
     assert log_kwargs.get("exc_info") is True
-    assert mongodb_utils.db_client is None # Verifica se o global não foi setado
-    assert mongodb_utils.db_instance is None # Verifica se o global não foi setado
+    assert mongodb_utils.db_client is None 
+    assert mongodb_utils.db_instance is None 
 
 @pytest.mark.asyncio
 async def test_connect_to_mongo_failure_ping(mocker):
@@ -110,7 +109,6 @@ async def test_connect_to_mongo_failure_ping(mocker):
     mocker.patch("motor.motor_asyncio.AsyncIOMotorClient", return_value=mock_motor_client)
     mock_logger_error = mocker.patch("app.db.mongodb_utils.logger.error")
     mocker.patch("app.db.mongodb_utils.settings.MONGODB_URL", "mongodb://dummy_ping_url")
-    # Garante que os globais estejam resetados
     mocker.patch("app.db.mongodb_utils.db_client", None)
     mocker.patch("app.db.mongodb_utils.db_instance", None)
 
@@ -125,5 +123,54 @@ async def test_connect_to_mongo_failure_ping(mocker):
     assert "Não foi possível conectar ao MongoDB" in log_args[0]
     assert str(simulated_error) in log_args[0]
     assert log_kwargs.get("exc_info") is True
-    assert mongodb_utils.db_client is None # Verifica se o global não foi setado com o mock que falhou no ping
+    assert mongodb_utils.db_client is None 
     assert mongodb_utils.db_instance is None
+
+@pytest.mark.asyncio
+async def test_check_mongo_connection_success(mocker):
+    """
+    Deve retornar True quando o comando ping for bem-sucedido.
+    """
+    # --- Arrange ---
+    mock_db = AsyncMock()
+    mock_db.command.return_value = {"ok": 1}
+    mocker.patch("app.db.mongodb_utils.connect_to_mongo", return_value=mock_db)
+
+    # --- Act ---
+    result = await mongodb_utils.check_mongo_connection()
+
+    # --- Assert ---
+    assert result is True
+    mock_db.command.assert_awaited_once_with("ping")
+
+
+@pytest.mark.asyncio
+async def test_check_mongo_connection_failure_connect(mocker):
+    """
+    Deve retornar False quando connect_to_mongo levanta exceção.
+    """
+    # --- Arrange ---
+    mocker.patch("app.db.mongodb_utils.connect_to_mongo", side_effect=Exception("Erro"))
+
+    # --- Act ---
+    result = await mongodb_utils.check_mongo_connection()
+
+    # --- Assert ---
+    assert result is False
+
+
+@pytest.mark.asyncio
+async def test_check_mongo_connection_failure_ping(mocker):
+    """
+    Deve retornar False quando comando ping levanta exceção.
+    """
+    # --- Arrange ---
+    mock_db = AsyncMock()
+    mock_db.command.side_effect = Exception("Ping falhou")
+    mocker.patch("app.db.mongodb_utils.connect_to_mongo", return_value=mock_db)
+
+    # --- Act ---
+    result = await mongodb_utils.check_mongo_connection()
+
+    # --- Assert ---
+    assert result is False
