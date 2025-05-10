@@ -3,7 +3,7 @@
 <!-- Badges -->
 [![CI](https://img.shields.io/github/actions/workflow/status/Eng-Soft-Claudio/SmartTask/ci.yml?branch=main&style=for-the-badge)](https://github.com/Eng-Soft-Claudio/SmartTask/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/codecov/c/github/Eng-Soft-Claudio/SmartTask?branch=main&style=for-the-badge)](https://codecov.io/gh/Eng-Soft-Claudio/SmartTask)  
-[![Python Version](https://img.shields.io/badge/Python-3.12%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
+[![Python Version](https://img.shields.io/badge/Python-3.10%2B-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
 [![Framework](https://img.shields.io/badge/Framework-FastAPI-blue.svg?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge)](LICENSE)  
 [![Issues](https://img.shields.io/github/issues/Eng-Soft-Claudio/SmartTask?style=for-the-badge&logo=github)](https://github.com/Eng-Soft-Claudio/SmartTask/issues)
@@ -31,7 +31,7 @@
 
 ## Tecnologias Utilizadas 🛠️
 
-*   **Backend:** Python 3.12+
+*   **Backend:** Python 3.10+
 *   **Framework API:** FastAPI
 *   **Validação de Dados:** Pydantic
 *   **Banco de Dados:** MongoDB (interação assíncrona com Motor)
