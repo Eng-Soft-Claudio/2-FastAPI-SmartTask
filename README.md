@@ -31,11 +31,10 @@
 
 ## Tecnologias Utilizadas 🛠️
 
-*   **Backend:** Python 3.10+
+*   **Backend:** Python 3.12+
 *   **Framework API:** FastAPI
 *   **Validação de Dados:** Pydantic
 *   **Banco de Dados:** MongoDB (interação assíncrona com Motor)
-    *   *Deploy Sugerido:* MongoDB Atlas
 *   **Filas e Tarefas em Background (E-mail):** ARQ (Asynchronous Redis Queue)
 *   **Cache/Broker para ARQ:** Redis
 *   **Autenticação:** JWT (python-jose), Hashing de Senha (Passlib\[bcrypt])
@@ -84,7 +83,7 @@ Para rodar este projeto localmente, você precisará ter instalado:
     ```
 
 4.  **Configure as Variáveis de Ambiente:**
-    *   Copie o arquivo `.env.example` (se existir) para `.env` ou crie um arquivo `.env` na raiz do projeto.
+    *   Copie o arquivo `.env.example` para `.env` na raiz do projeto.
     *   Edite o `.env` e preencha **obrigatoriamente**:
         *   `MONGODB_URL`: Sua string de conexão do MongoDB (ex: do Atlas).
         *   `JWT_SECRET_KEY`: Gere uma chave forte (ex: `openssl rand -hex 32`).
@@ -133,7 +132,7 @@ Para rodar este projeto localmente, você precisará ter instalado:
 *   Certifique-se que o **servidor Uvicorn NÃO esteja rodando** (os testes usam um cliente em memória).
 *   (No terminal, com `venv` ativado, na raiz do projeto)
     ```bash
-    pytest -v -s
+    pytest -v --cov=app --cov-report term-missing
     ```
 
 ---
@@ -142,28 +141,28 @@ Para rodar este projeto localmente, você precisará ter instalado:
 
 ```bash
 SmartTask/
-├── app/ # Diretório principal da aplicação FastAPI
-│ ├── core/ # Configurações, segurança, utils, email, webhook, etc.
-│ ├── db/ # Lógica de acesso ao banco de dados (MongoDB utils, CRUDs)
-│ ├── models/ # Modelos Pydantic (User, Task, Token)
-│ ├── routers/ # Roteadores FastAPI (endpoints /auth, /tasks)
-│ ├── email-templates/ # Templates HTML para e-mails
+├── app/                # Diretório principal da aplicação FastAPI
+│ ├── core/             # Configurações, segurança, utils, email, webhook, etc.
+│ ├── db/               # Lógica de acesso ao banco de dados (MongoDB utils, CRUDs)
+│ ├── models/           # Modelos Pydantic (User, Task, Token)
+│ ├── routers/          # Roteadores FastAPI (endpoints /auth, /tasks)
+│ ├── email-templates/  # Templates HTML para e-mails
 │ ├── init.py
-│ ├── main.py # Ponto de entrada da aplicação FastAPI (criação da app, lifespan, inclusão de routers)
-│ └── worker.py # Definição das tarefas e configurações do worker ARQ
-├── tests/ # Testes automatizados (Pytest)
+│ ├── main.py           # Ponto de entrada da aplicação FastAPI (criação da app, lifespan, inclusão de routers)
+│ └── worker.py         # Definição das tarefas e configurações do worker ARQ
+├── tests/              # Testes automatizados (Pytest)
 │ ├── init.py
-│ └── conftest.py # Fixtures e configuração do Pytest
-│ └── test_*.py # Arquivos de teste
-├── venv/ # Ambiente virtual Python (ignorado pelo Git)
-├── .env # Variáveis de ambiente locais (NÃO COMMITAR!)
-├── .env.example # Exemplo de variáveis de ambiente necessárias
-├── .gitignore # Arquivos e pastas a serem ignorados pelo Git
-├── Dockerfile # (Futuro) Para containerizar a API
-├── docker-compose.yml # (Futuro) Para orquestrar API, worker e Redis (opcional)
-├── LICENSE # Arquivo de licença (MIT)
-├── README.md # Este arquivo
-└── requirements.txt # Dependências Python do projeto
+│ └── conftest.py       # Fixtures e configuração do Pytest
+│ └── test_*.py         # Arquivos de teste
+├── venv/               # Ambiente virtual Python (ignorado pelo Git)
+├── .env                # Variáveis de ambiente locais (NÃO COMMITAR!)
+├── .env.example        # Exemplo de variáveis de ambiente necessárias
+├── .gitignore          # Arquivos e pastas a serem ignorados pelo Git
+├── Dockerfile          # Para containerizar a API
+├── docker-compose.yml  # Para orquestrar API, worker e Redis (opcional)
+├── LICENSE             # Arquivo de licença (MIT)
+├── README.md           # Este arquivo
+└── requirements.txt    # Dependências Python do projeto
 ```
 
 ---
