@@ -1,8 +1,4 @@
 # docker-compose.yml
-
-# Versão da especificação do Docker Compose
-# Use versões mais recentes para mais funcionalidades, mas verifique compatibilidade
-# Versão 3.8+ é uma boa escolha geral
 version: '3.8'
 
 # Definição dos serviços que compõem a aplicação
@@ -10,71 +6,66 @@ services:
 
   # --- Serviço Redis ---
   redis:
-    image: redis:latest            # Usa a imagem oficial do Redis
-    container_name: smarttask-redis # Nome fixo para o contêiner
+    image: redis:7.0.11-alpine
+    container_name: smarttask-redis
     ports:
-      - "6379:6379"                # Mapeia a porta do host para a porta do contêiner
-    restart: unless-stopped        # Reinicia o contêiner se ele parar, a menos que explicitamente parado
+      - "6379:6379"
+    restart: unless-stopped
     volumes:
-      - redis_data:/data           # Monta um volume nomeado para persistir dados do Redis
-    networks:                      # Define a rede que este serviço usará
+      - redis_data:/data
+    networks:
       - smarttask-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      retries: 3
 
   # --- Serviço da API FastAPI ---
   api:
     container_name: smarttask-api
     build:
-      context: .                   # Diretório onde o Dockerfile está (raiz do projeto)
-      dockerfile: Dockerfile       # Nome do Dockerfile a ser usado
-    # Se você já construiu a imagem manualmente e quer usá-la:
-    # image: smarttask-api:latest  # Use esta linha em vez de 'build:'
+      context: .
+      dockerfile: Dockerfile
     ports:
-      - "8000:8000"                # Mapeia a porta 8000 do host para a 8000 do contêiner (onde Uvicorn roda)
+      - "8000:8000"
     env_file:
-      - .env                       # Carrega variáveis de ambiente do arquivo .env
-    volumes:
-       # Monta o código da aplicação local no contêiner para desenvolvimento com reload
-       # Útil se você estiver rodando uvicorn com --reload dentro do compose (mas não recomendado para produção)
-       # Se usar o CMD padrão do Dockerfile (sem --reload), esta linha não é estritamente necessária,
-       # pois o código já foi copiado na imagem. Mas pode ser útil para logs ou outros arquivos.
-       - ./app:/app/app
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 # Comando para iniciar a API
-             # Adicionar --reload aqui SE E SOMENTE SE você montar o volume acima
-             # e quiser hot-reloading durante o desenvolvimento via compose.
-             # Não use --reload em produção!
-    depends_on:                    # Garante que o Redis inicie ANTES da API
-      - redis
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - smarttask-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 30s
+      retries: 3
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   # --- Serviço do Worker ARQ ---
   worker:
     container_name: smarttask-worker
-    build:                         # Usa o mesmo contexto e Dockerfile da API
+    build:
       context: .
       dockerfile: Dockerfile
-    # Ou use a mesma imagem já construída:
-    # image: smarttask-api:latest
-    command: arq app.worker.WorkerSettings # <<< Comando diferente para iniciar o worker
     env_file:
-      - .env                       # Também precisa das variáveis (DB, Redis, Mail URLs)
-    volumes:                       # Montar volume é útil aqui também se fizer alterações no worker.py
-      - ./app:/app/app
-    depends_on:                    # Garante que Redis e API (se o worker depender de chamadas a ela) iniciem antes
-      - redis
-      # - api # Descomente se o worker precisar que a API esteja rodando (improvável no nosso caso)
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - smarttask-net
+    environment:
+      - REDIS_HOST=smarttask-redis
+    command: arq app.worker.WorkerSettings
 
 # --- Definição de Redes ---
 networks:
-  smarttask-net:                 # Nome da rede personalizada
-    driver: bridge                 # Usa o driver de rede padrão 'bridge'
+  smarttask-net:                 
+    driver: bridge                
 
 # --- Definição de Volumes ---
-# Necessário para persistir dados do Redis entre reinicializações do contêiner
 volumes:
   redis_data:
-    driver: local                  # Usa o driver de volume local padrão
+    driver: local                  
