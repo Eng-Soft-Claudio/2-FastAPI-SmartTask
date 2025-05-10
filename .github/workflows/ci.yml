@@ -11,6 +11,17 @@ jobs:
     name: Run Tests and Coverage
     runs-on: ubuntu-latest
 
+    services:
+      mongodb:
+        image: mongo:6.0
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd="mongo --eval 'db.adminCommand(\"ping\")'"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
     steps:
       - name: Checkout do código
         uses: actions/checkout@v3
@@ -32,6 +43,7 @@ jobs:
       - name: Executar testes com cobertura
         env:
           ENVIRONMENT: test
+          MONGO_URL: mongodb://localhost:27017
         run: |
           pytest --cov=app --cov-report=xml:coverage.xml
 
