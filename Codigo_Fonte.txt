@@ -62,12 +62,13 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # ========================
-# --- Carregamento do .env ---
+# --- Carregamento do .env.test ---
 # ========================
-# Define o caminho para o arquivo .env na raiz do projeto
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
-# Carrega as variáveis do arquivo .env para o ambiente, se o arquivo existir
-loaded = load_dotenv(dotenv_path=dotenv_path)
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+env_file = ".env.test" if os.getenv("ENVIRONMENT") == "test" else ".env"
+dotenv_path = os.path.join(base_dir, env_file)
+load_dotenv(dotenv_path=dotenv_path)
+
 
 # ========================
 # --- Definição das Configurações ---
@@ -184,12 +185,8 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def check_webhook_config(self) -> 'Settings':
         """Validações adicionais para configuração do webhook, se necessário."""
-        # Exemplo de validação que poderia fazer sentido se a assinatura fosse obrigatória com URL:
-        # if self.WEBHOOK_URL and not self.WEBHOOK_SECRET:
-        #     logger.warning(
-        #         "WEBHOOK_URL está configurado, mas WEBHOOK_SECRET não está. "
-        #         "Webhooks não serão assinados, o que pode ser uma falha de segurança."
-        #     )
+        if self.WEBHOOK_URL and not self.WEBHOOK_SECRET:
+            raise ValueError("WEBHOOK_SECRET deve ser definido quando WEBHOOK_URL estiver ativa.")
         return self
 
 # ========================
@@ -3922,6 +3919,16 @@ def test_settings_missing_required_pydantic_field_fails(monkeypatch):
 
     assert "JWT_SECRET_KEY" in str(exc_info.value).upper() or "FIELD REQUIRED" in str(exc_info.value).upper()
     print(f"  Pydantic ValidationError capturada como esperado: {exc_info.value}")
+
+# --- Testes de Validação de Webhook ---
+def test_webhook_secret_required_with_url(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_URL", "http://example.com/webhook")
+    monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+
+    assert "WEBHOOK_SECRET deve ser definido" in str(exc_info.value)
 
 ================================================================================
 Capítulo 20: tests/test_core_dependencies.py
