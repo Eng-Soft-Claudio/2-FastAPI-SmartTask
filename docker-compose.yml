@@ -60,6 +60,25 @@ services:
       - REDIS_HOST=smarttask-redis
     command: arq app.worker.WorkerSettings
 
+  # --- Serviço MongoDB ---
+  mongodb:
+    image: mongo:latest
+    container_name: smarttask-mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodb_data:/data/db:rw
+    restart: unless-stopped
+    networks:
+      - smarttask-net
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.runCommand('ping')"]
+      interval: 30s
+      retries: 3
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=example
+
 # --- Definição de Redes ---
 networks:
   smarttask-net:                 
@@ -68,4 +87,6 @@ networks:
 # --- Definição de Volumes ---
 volumes:
   redis_data:
-    driver: local                  
+    driver: local
+  mongodb_data:
+    driver: local
