@@ -145,7 +145,7 @@ SmartTask/
 │ ├── core/             # Configurações, segurança, utils, email, webhook, etc.
 │ ├── db/               # Lógica de acesso ao banco de dados (MongoDB utils, CRUDs)
 │ ├── models/           # Modelos Pydantic (User, Task, Token)
-│ ├── routers/          # Roteadores FastAPI (endpoints /auth, /tasks)
+│ ├── routers/          # Roteadores FastAPI (endpoints /auth, /tasks, /health)
 │ ├── email-templates/  # Templates HTML para e-mails
 │ ├── init.py
 │ ├── main.py           # Ponto de entrada da aplicação FastAPI (criação da app, lifespan, inclusão de routers)
