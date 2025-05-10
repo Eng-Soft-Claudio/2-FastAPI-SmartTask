@@ -14,6 +14,8 @@ __pycache__/
 
 # Arquivos de ambiente
 .env
+.env.local
+.env.*.local
 
 # Logs
 *.log
@@ -24,4 +26,16 @@ dist/
 *.egg-info/
 
 # Arquivos de teste e debug
+.coverage
+*.coveragerc
+nosetests.xml
+pytest.xml
+*.log
 descriptive/
+
+# Outros arquivos temporários
+*.swp
+*.swo
+*.swn
+.DS_Store
+Thumbs.db
