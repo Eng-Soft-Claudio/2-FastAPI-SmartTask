@@ -201,3 +201,13 @@ def test_settings_missing_required_pydantic_field_fails(monkeypatch):
 
     assert "JWT_SECRET_KEY" in str(exc_info.value).upper() or "FIELD REQUIRED" in str(exc_info.value).upper()
     print(f"  Pydantic ValidationError capturada como esperado: {exc_info.value}")
+
+# --- Testes de Validação de Webhook ---
+def test_webhook_secret_required_with_url(monkeypatch):
+    monkeypatch.setenv("WEBHOOK_URL", "http://example.com/webhook")
+    monkeypatch.delenv("WEBHOOK_SECRET", raising=False)
+
+    with pytest.raises(ValidationError) as exc_info:
+        Settings()
+
+    assert "WEBHOOK_SECRET deve ser definido" in str(exc_info.value)

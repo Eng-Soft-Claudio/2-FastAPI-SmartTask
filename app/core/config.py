@@ -142,12 +142,8 @@ class Settings(BaseSettings):
     @model_validator(mode='after')
     def check_webhook_config(self) -> 'Settings':
         """Validações adicionais para configuração do webhook, se necessário."""
-        # Exemplo de validação que poderia fazer sentido se a assinatura fosse obrigatória com URL:
-        # if self.WEBHOOK_URL and not self.WEBHOOK_SECRET:
-        #     logger.warning(
-        #         "WEBHOOK_URL está configurado, mas WEBHOOK_SECRET não está. "
-        #         "Webhooks não serão assinados, o que pode ser uma falha de segurança."
-        #     )
+        if self.WEBHOOK_URL and not self.WEBHOOK_SECRET:
+            raise ValueError("WEBHOOK_SECRET deve ser definido quando WEBHOOK_URL estiver ativa.")
         return self
 
 # ========================
