@@ -20,12 +20,13 @@ from dotenv import load_dotenv
 logger = logging.getLogger(__name__)
 
 # ========================
-# --- Carregamento do .env ---
+# --- Carregamento do .env.test ---
 # ========================
-# Define o caminho para o arquivo .env na raiz do projeto
-dotenv_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '.env')
-# Carrega as variáveis do arquivo .env para o ambiente, se o arquivo existir
-loaded = load_dotenv(dotenv_path=dotenv_path)
+base_dir = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+env_file = ".env.test" if os.getenv("ENVIRONMENT") == "test" else ".env"
+dotenv_path = os.path.join(base_dir, env_file)
+load_dotenv(dotenv_path=dotenv_path)
+
 
 # ========================
 # --- Definição das Configurações ---

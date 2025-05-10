@@ -28,15 +28,14 @@ jobs:
 
       - name: Executar testes com cobertura
         env:
-          MONGODB_URL: "mongodb://localhost:27017/test-db"
-          JWT_SECRET_KEY: "test-secret-key"
+          ENVIRONMENT: test
         run: |
-          pytest --cov=app --cov-report=xml
+          pytest --cov=app --cov-report=xml:coverage.xml
 
       - name: Enviar cobertura para o Codecov
         uses: codecov/codecov-action@v3
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: unittests
           name: codecov-report
+          
