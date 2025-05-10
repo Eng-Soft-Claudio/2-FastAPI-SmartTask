@@ -40,6 +40,16 @@ jobs:
       - name: Criar diretório de templates de e-mail (fake)
         run: mkdir -p app/email-templates/build
 
+      - name: Aguarda MongoDB ficar disponível
+        run: |
+          for i in {1..10}; do
+            nc -z localhost 27017 && echo "MongoDB está pronto!" && exit 0
+            echo "Aguardando MongoDB..."
+            sleep 3
+          done
+          echo "MongoDB não respondeu a tempo." >&2
+          exit 1
+
       - name: Executar testes com cobertura
         env:
           ENVIRONMENT: test
