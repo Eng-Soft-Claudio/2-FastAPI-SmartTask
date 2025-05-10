@@ -27,6 +27,9 @@ jobs:
           pip install pytest pytest-asyncio pytest-cov codecov
 
       - name: Executar testes com cobertura
+        env:
+          MONGODB_URL: "mongodb://localhost:27017/test-db"
+          JWT_SECRET_KEY: "test-secret-key"
         run: |
           pytest --cov=app --cov-report=xml
 
