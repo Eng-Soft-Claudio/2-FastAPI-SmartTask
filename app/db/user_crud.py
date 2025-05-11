@@ -17,8 +17,8 @@ from pydantic import ValidationError
 from pymongo.errors import DuplicateKeyError
 
 # --- Módulos da Aplicação ---
-from app.models.user import UserCreate, UserInDB, UserUpdate
-from app.core.security import get_password_hash
+from models.user import UserCreate, UserInDB, UserUpdate
+from core.security import get_password_hash
 
 # ========================
 # --- Configurações e Constantes ---

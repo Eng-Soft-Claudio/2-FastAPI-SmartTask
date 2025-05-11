@@ -8,15 +8,27 @@ services:
   redis:
     image: redis:7.0.11-alpine
     container_name: smarttask-redis
-    ports:
-      - "6379:6379"
+    ports: ["6379:6379"]
     restart: unless-stopped
-    volumes:
-      - redis_data:/data
-    networks:
-      - smarttask-net
+    volumes: [redis_data:/data]
+    networks: [smarttask-net]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      retries: 3
+
+   # --- Serviço MongoDB (local) ---
+  mongodb:
+    image: mongo:6.0.12
+    container_name: smarttask-mongodb
+    ports: ["27018:27017"]
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: admin
+      MONGO_INITDB_ROOT_PASSWORD: example
+    volumes: [mongodb_data:/data/db]
+    networks: [smarttask-net]
+    healthcheck:
+      test: ["CMD-SHELL", "mongosh --eval 'db.runCommand({ping:1})' --username admin --password example --authenticationDatabase admin"]
       interval: 30s
       retries: 3
 
@@ -25,83 +37,53 @@ services:
     container_name: smarttask-api
     build:
       context: .
-      dockerfile: Dockerfile.api
-    ports:
-      - "8000:8000"
-    env_file:
-      - .env
+      dockerfile: Dockerfile
+      target: base
+    ports: ["8000:8000"]
+    env_file: [.env]
     depends_on:
       redis:
         condition: service_healthy
       mongodb:
         condition: service_healthy
     restart: unless-stopped
-    networks:
-      - smarttask-net
+    networks: [smarttask-net]
     healthcheck:
-      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health"]
       interval: 30s
       retries: 3
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000
 
   # --- Serviço do Worker ARQ ---
   worker:
     container_name: smarttask-worker
     build:
       context: .
-      dockerfile: Dockerfile.worker
-    env_file:
-      - .env
+      dockerfile: Dockerfile
+      target: base
+    env_file: [.env]
     depends_on:
       redis:
         condition: service_healthy
       mongodb:
         condition: service_healthy
     restart: unless-stopped
-    networks:
-      - smarttask-net
-    command: arq app.worker.WorkerSettings
-
-  # --- Serviço MongoDB (local) ---
-  mongodb:
-    image: mongo:6.0.12
-    container_name: smarttask-mongodb
-    ports:
-      - "27017:27017"
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=example
-    volumes:
-      - mongodb_data:/data/db
-    restart: unless-stopped
-    networks:
-      - smarttask-net
-    healthcheck:
-      test: [
-        "CMD", "mongo",
-        "--username", "admin",
-        "--password", "example",
-        "--authenticationDatabase", "admin",
-        "--eval", "db.runCommand({ ping: 1 })"
-      ]
-      interval: 30s
-      retries: 3
+    networks: [smarttask-net]
+    command: arq worker.WorkerSettings
   
   # --- Serviço de Testes ---
   test:
     container_name: smarttask-test
     build:
       context: .
-      dockerfile: Dockerfile.test
-    env_file:
-      - .env
+      dockerfile: Dockerfile
+      target: test
+    env_file: [.env.test.docker]
     depends_on:
       redis:
         condition: service_healthy
       mongodb:
         condition: service_healthy
-    networks:
-      - smarttask-net
+    networks: [smarttask-net]
     command: pytest --maxfail=5 --disable-warnings --cov=app --cov-report=term-missing
 
 # --- Definição de Redes ---
@@ -112,6 +94,4 @@ networks:
 # --- Definição de Volumes ---
 volumes:
   redis_data:
-    driver: local
   mongodb_data:
-    driver: local

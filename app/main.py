@@ -15,12 +15,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 # --- Módulos da Aplicação ---
-from app.routers import tasks, auth, health
-from app.db.mongodb_utils import connect_to_mongo, close_mongo_connection
-from app.db.user_crud import create_user_indexes
-from app.db.task_crud import create_task_indexes
-from app.core.config import Settings, settings 
-from app.core.logging_config import setup_logging 
+from routers import tasks, auth, health
+from db.mongodb_utils import connect_to_mongo, close_mongo_connection
+from db.user_crud import create_user_indexes
+from db.task_crud import create_task_indexes
+from core.config import Settings, settings 
+from core.logging_config import setup_logging 
 
 # ========================
 # --- Configuração de Logging ---

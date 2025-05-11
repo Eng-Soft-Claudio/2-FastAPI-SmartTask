@@ -5,7 +5,7 @@
 # ========================
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
-from app.db.mongodb_utils import check_mongo_connection
+from db.mongodb_utils import check_mongo_connection
 from redis import Redis, RedisError
 
 

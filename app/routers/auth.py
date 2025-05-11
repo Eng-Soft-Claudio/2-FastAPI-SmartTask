@@ -16,11 +16,11 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pymongo.errors import DuplicateKeyError
 
 # --- Módulos da Aplicação ---
-from app.core.dependencies import CurrentUser, DbDep 
-from app.core.security import create_access_token, verify_password
-from app.db import user_crud
-from app.models.token import Token
-from app.models.user import User, UserCreate, UserUpdate
+from core.dependencies import CurrentUser, DbDep 
+from core.security import create_access_token, verify_password
+from db import user_crud
+from models.token import Token
+from models.user import User, UserCreate, UserUpdate
 
 # ========================
 # --- Configuração do Router ---

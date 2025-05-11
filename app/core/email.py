@@ -15,7 +15,7 @@ from fastapi_mail import FastMail, MessageSchema, ConnectionConfig, MessageType
 from pydantic import EmailStr
 
 # --- Módulos da Aplicação ---
-from app.core.config import settings
+from core.config import settings
 
 # ========================
 # --- Configuração do Logger ---

@@ -3,6 +3,13 @@
 import warnings
 warnings.filterwarnings("ignore", category=DeprecationWarning, module="passlib")
 
+# ========================
+# --- Configuração .env.test ---
+# ========================
+from dotenv import load_dotenv
+import os
+load_dotenv(dotenv_path='.env.test')
+
 """
 Este módulo define fixtures do Pytest que são compartilhadas entre diferentes
 arquivos de teste na suíte de testes da aplicação SmartTask.
@@ -27,7 +34,6 @@ import asyncio
 import logging
 import uuid
 from typing import AsyncGenerator, Dict, List, Any, Optional
-
 import pytest
 import pytest_asyncio
 from fastapi import status
