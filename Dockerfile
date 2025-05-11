@@ -1,7 +1,7 @@
 # Dockerfile
 
 # --- Estágio 1: Base com Python ---
-FROM python:3.13-slim AS base
+FROM python:3.11-slim AS base
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 WORKDIR /app
@@ -30,3 +30,11 @@ USER appuser
 # --- Estágio 4: Expor a Porta e Definir Comando de Execução ---
 EXPOSE 8000
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+
+# --- Estágio 5: Testes (opcional) ---
+FROM base AS test
+# Instalar dependências de teste
+RUN pip install --no-cache-dir pytest pytest-cov
+
+# Rodar os testes
+CMD ["pytest", "--cov=app", "--cov-report", "xml"]

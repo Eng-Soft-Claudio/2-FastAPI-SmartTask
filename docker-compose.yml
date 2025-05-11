@@ -25,7 +25,7 @@ services:
     container_name: smarttask-api
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.api
     ports:
       - "8000:8000"
     env_file:
@@ -33,11 +33,13 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - smarttask-net
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD", "python3", "-c", "import requests; requests.get('http://localhost:8000/health').raise_for_status()"]
       interval: 30s
       retries: 3
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
@@ -47,37 +49,60 @@ services:
     container_name: smarttask-worker
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.worker
     env_file:
       - .env
     depends_on:
       redis:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - smarttask-net
-    environment:
-      - REDIS_HOST=smarttask-redis
     command: arq app.worker.WorkerSettings
 
-  # --- Serviço MongoDB ---
+  # --- Serviço MongoDB (local) ---
   mongodb:
-    image: mongo:latest
+    image: mongo:6.0.12
     container_name: smarttask-mongodb
     ports:
-      - "27018:27017"
+      - "27017:27017"
+    environment:
+      - MONGO_INITDB_ROOT_USERNAME=admin
+      - MONGO_INITDB_ROOT_PASSWORD=example
     volumes:
-      - mongodb_data:/data/db:rw
+      - mongodb_data:/data/db
     restart: unless-stopped
     networks:
       - smarttask-net
     healthcheck:
-      test: ["CMD", "mongo", "--eval", "db.runCommand('ping')"]
+      test: [
+        "CMD", "mongo",
+        "--username", "admin",
+        "--password", "example",
+        "--authenticationDatabase", "admin",
+        "--eval", "db.runCommand({ ping: 1 })"
+      ]
       interval: 30s
       retries: 3
-    environment:
-      - MONGO_INITDB_ROOT_USERNAME=admin
-      - MONGO_INITDB_ROOT_PASSWORD=example
+  
+  # --- Serviço de Testes ---
+  test:
+    container_name: smarttask-test
+    build:
+      context: .
+      dockerfile: Dockerfile.test
+    env_file:
+      - .env
+    depends_on:
+      redis:
+        condition: service_healthy
+      mongodb:
+        condition: service_healthy
+    networks:
+      - smarttask-net
+    command: pytest --maxfail=5 --disable-warnings --cov=app --cov-report=term-missing
 
 # --- Definição de Redes ---
 networks:
