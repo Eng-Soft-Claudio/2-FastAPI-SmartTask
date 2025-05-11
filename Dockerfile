@@ -27,10 +27,7 @@ CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
 
 # --- Estágio 3: Testes ---
 FROM base AS test
-# É uma boa prática instalar pacotes como root ou ajustar permissões
 USER root
 RUN pip install --no-cache-dir pytest pytest-cov
 USER appuser
-# Se __init__.py existe em app/, --cov=app deve funcionar quando executado de /app.
-# Caso contrário, --cov=. seria uma alternativa se você não tem __init__.py
 CMD ["pytest", "--maxfail=5", "--disable-warnings", "--cov=app", "--cov-report=term-missing"]
