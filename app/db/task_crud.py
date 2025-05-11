@@ -17,7 +17,7 @@ from pymongo import ASCENDING, DESCENDING
 from pydantic import ValidationError
 
 # --- Módulos da Aplicação ---
-from models.task import Task, TaskCreate, TaskUpdate, TaskStatus
+from app.models.task import Task, TaskCreate, TaskUpdate, TaskStatus
 
 # =====================================
 # --- Configurações e Constantes ---

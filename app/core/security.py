@@ -16,8 +16,8 @@ from jose import ExpiredSignatureError, jwt, JWTError
 from pydantic import ValidationError
 
 # --- Módulos da Aplicação ---
-from core.config import settings
-from models.token import TokenPayload
+from app.core.config import settings
+from app.models.token import TokenPayload
 
 # ========================
 # --- Configuração do Logger ---

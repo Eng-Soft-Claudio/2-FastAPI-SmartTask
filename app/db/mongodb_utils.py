@@ -14,7 +14,7 @@ import motor.motor_asyncio
 from motor.motor_asyncio import AsyncIOMotorClient, AsyncIOMotorDatabase 
 
 # --- Módulos da Aplicação ---
-from core.config import settings
+from app.core.config import settings
 
 # ========================
 # --- Configuração do Logger ---

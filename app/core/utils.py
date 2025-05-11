@@ -19,8 +19,8 @@ from typing import Any, Dict, Optional
 import httpx
 
 # --- Módulos da Aplicação ---
-from models.task import Task # Importação direta do modelo Task
-from core.config import settings
+from app.models.task import Task # Importação direta do modelo Task
+from app.core.config import settings
 
 # ========================
 # --- Configuração do Logger ---

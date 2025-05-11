@@ -22,13 +22,13 @@ from motor.motor_asyncio import AsyncIOMotorDatabase
 from pydantic import ValidationError
 
 # --- Módulos da Aplicação ---
-from core.dependencies import CurrentUser, DbDep
-from core.email import send_urgent_task_notification
-from core.utils import (calculate_priority_score, is_task_urgent,
+from app.core.dependencies import CurrentUser, DbDep
+from app.core.email import send_urgent_task_notification
+from app.core.utils import (calculate_priority_score, is_task_urgent,
                             send_webhook_notification)
-from db import task_crud
-from models.task import Task, TaskCreate, TaskStatus, TaskUpdate
-from core.config import settings
+from app.db import task_crud
+from app.models.task import Task, TaskCreate, TaskStatus, TaskUpdate
+from app.core.config import settings
 
 # ========================
 # --- Configurações e Constantes ---

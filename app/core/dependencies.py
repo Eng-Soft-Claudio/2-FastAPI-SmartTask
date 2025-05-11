@@ -14,10 +14,10 @@ from typing import Annotated
 import uuid
 
 # --- Módulos da Aplicação ---
-from db.mongodb_utils import get_database
-from core.security import decode_token
-from db import user_crud
-from models.user import UserInDB
+from app.db.mongodb_utils import get_database
+from app.core.security import decode_token
+from app.db import user_crud
+from app.models.user import UserInDB
 
 # ========================
 # --- Esquema OAuth2 ---
