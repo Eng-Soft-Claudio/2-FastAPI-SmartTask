@@ -68,7 +68,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
     networks: [smarttask-net]
-    command: arq worker.WorkerSettings
+    command: arq app.worker.WorkerSettings
   
   # --- Serviço de Testes ---
   test:

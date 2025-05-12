@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tarefa Urgente: {{ task_title }}</title>
+    <style>
+        body { font-family: sans-serif; line-height: 1.6; color: #333; }
+        .container { max-width: 600px; margin: 20px auto; padding: 20px; border: 1px solid #ddd; border-radius: 5px; }
+        .header { background-color: #f8f8f8; padding: 10px; text-align: center; border-bottom: 1px solid #ddd; }
+        .content { padding: 20px 0; }
+        .footer { margin-top: 20px; font-size: 0.9em; color: #777; text-align: center; }
+        .button { display: inline-block; padding: 10px 15px; background-color: #007bff; color: #ffffff; text-decoration: none; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h2>Alerta de Tarefa Urgente - {{ project_name }}</h2>
+        </div>
+        <div class="content">
+            <p>Olá {{ user_name }},</p>
+            <p>A seguinte tarefa foi identificada como urgente:</p>
+            <ul>
+                <li><strong>Título:</strong> {{ task_title }}</li>
+                <li><strong>Prioridade Calculada:</strong> {{ priority_score }}</li>
+                <li><strong>Data de Vencimento:</strong> {{ due_date }}</li>
+            </ul>
+
+            {% if task_link %}
+            <p>Você pode acessar a tarefa clicando no botão abaixo:</p>
+            <p style="text-align: center;">
+                <a href="{{ task_link }}" class="button" style="color: #ffffff;">Ver Tarefa</a>
+            </p>
+            {% endif %}
+
+            <p>Por favor, verifique-a assim que possível.</p>
+        </div>
+        <div class="footer">
+            <p>Este é um e-mail automático de {{ project_name }}.</p>
+        </div>
+    </div>
+</body>
+</html>
