@@ -12,7 +12,7 @@
 
 ## Visão Geral ✨
 
-**SmartTask API** é uma API RESTful assíncrona construída com FastAPI para gerenciamento inteligente de tarefas pessoais ou de equipe. O diferencial está no sistema de priorização automática de tarefas, baseado em importância e urgência (data de vencimento), auxiliando na organização e foco no que realmente importa.
+**SmartTask** é uma API RESTful assíncrona construída com FastAPI para gerenciamento inteligente de tarefas pessoais ou de equipe. O diferencial está no sistema de priorização automática de tarefas, baseado em importância e urgência (data de vencimento), auxiliando na organização e foco no que realmente importa.
 
 ---
 
