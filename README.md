@@ -1,4 +1,4 @@
-# SmartTask API 🚀
+# 🚀 SmartTask 🚀
 
 <!-- Badges -->
 [![CI](https://img.shields.io/github/actions/workflow/status/Eng-Soft-Claudio/SmartTask/ci.yml?branch=main&style=for-the-badge)](https://github.com/Eng-Soft-Claudio/SmartTask/actions/workflows/ci.yml)
